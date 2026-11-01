@@ -11,6 +11,24 @@ export const CATALOG = {
   table: { name: 'Work table', width: 2.0, depth: 0.9, height: 0.75, color: '#bd8a4b' },
   chair: { name: 'Chair', width: 0.5, depth: 0.55, height: 0.85, color: '#3c5049' },
 };
+// Built-in procedural models: stable type IDs also survive save/export/undo.
+export const COUCH_TYPES = [
+  ['couch-chesterfield', 'Oxblood Chesterfield', '#793e43', 'chesterfield'],
+  ['couch-scandi', 'Sage Scandinavian', '#849982', 'scandi'],
+  ['couch-channel', 'Mustard channel couch', '#cf9f43', 'channel'],
+  ['couch-tuxedo', 'Navy tuxedo couch', '#344d70', 'tuxedo'],
+  ['couch-cloud', 'Cream cloud couch', '#e8ddc9', 'cloud'],
+  ['couch-midcentury', 'Terracotta mid-century', '#b9674c', 'midcentury'],
+  ['couch-modular', 'Lavender modular couch', '#9988af', 'modular'],
+  ['couch-bench', 'Teal timber couch', '#387e7d', 'bench'],
+].map(([type, name, color, style]) => {
+  CATALOG[type] = { name, color, style, kind: 'couch', width: 2.1, depth: 0.95, height: 0.95, seatHeight: 0.57 };
+  return type;
+});
+for (const [type, name, color] of [
+  ['coffee', 'Coffee station', '#74503a'], ['tea', 'Tea station', '#67846d'], ['snacks', 'Snack table', '#c08b47'],
+]) CATALOG[type] = { name, color, kind: 'refreshment', width: 1.6, depth: 0.65, height: 1.15 };
+export const isCouch = type => type === 'couch' || CATALOG[type]?.kind === 'couch';
 export function bounds(item) {
   const d = CATALOG[item.type], c = Math.abs(Math.cos(item.rotation)), s = Math.abs(Math.sin(item.rotation));
   return { x: (d.width * c + d.depth * s) / 2, z: (d.width * s + d.depth * c) / 2 };
@@ -42,7 +60,7 @@ export function initialLayout() {
 }
 
 export const ACTIVITIES = {
-  hackathon: { name: 'Hackathon', description: 'Team worktables with four chairs each and a central aisle.' },
+  hackathon: { name: 'Hackathon', description: '100 desk seats, eight colourful couch designs, plus coffee, tea and snacks in the default venue. Central aisle between team tables.' },
   theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
 };
 
@@ -56,12 +74,23 @@ export function activityLayout(activity, requested, room = ROOM) {
   const add = (type, x, z, rotation = 0) => items.push(constrain({ type, x, z, rotation }, room));
   let capacity;
   if (activity === 'hackathon') {
+    // Reserve the entrance end for a lounge and refreshments when the room
+    // can fit the full amenity area. Smaller rooms keep honest desk shortfalls.
+    const lounge = room.width >= 11 && room.depth >= 18;
+    if (lounge) {
+      const end = room.depth / 2;
+      const xs = [-4.3, -1.7, 1.7, 4.3];
+      COUCH_TYPES.forEach((type, i) => add(type, xs[i % 4], end - (i < 4 ? 3.35 : 1.2), i < 4 ? 0 : Math.PI));
+      ['coffee', 'tea', 'snacks'].forEach((type, i) => add(type, [-4.3, -2.4, 4.3][i], end - 4.9));
+    }
     const columns = [];
     for (let x = 1.9; x <= room.width / 2 - 1.15 + 1e-9; x += 2.2) columns.push(-x, x);
     columns.sort((a, b) => a - b);
-    for (let z = -room.depth / 2 + 2.3; z <= room.depth / 2 - 2.3 + 1e-9; z += 2.9)
-      for (const x of columns) if (slots.length < 40) slots.push({ x, z });
-    capacity = slots.length * 4; // At most 40 tables + 160 chairs = 200 objects.
+    const maxTables = Math.floor((200 - items.length) / 5);
+    const lastZ = room.depth / 2 - (lounge ? 6.7 : 2.3);
+    for (let z = -room.depth / 2 + 1.4; z <= lastZ + 1e-9; z += lounge ? 2.3 : 2.9)
+      for (const x of columns) if (slots.length < maxTables) slots.push({ x, z });
+    capacity = slots.length * 4; // Desk seats only; lounge seats are additional.
     let remaining = Math.min(requested, capacity);
     for (const { x, z } of slots) {
       if (!remaining) break;
@@ -83,6 +112,7 @@ export function activityLayout(activity, requested, room = ROOM) {
     if (capacity) add('stage', 0, -room.depth / 2 + 2.2);
     for (const { x, z } of slots.slice(0, requested)) add('chair', x, z, Math.PI);
   }
+  if (activity === 'hackathon') items.sort((a, b) => Number(isCouch(a.type) || CATALOG[a.type].kind === 'refreshment') - Number(isCouch(b.type) || CATALOG[b.type].kind === 'refreshment'));
   const seated = Math.min(requested, capacity);
   return { activity, requested, seated, capacity, shortfall: requested - seated, items };
 }

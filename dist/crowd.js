@@ -34,7 +34,7 @@ export function createCrowd(config, room, items, catalog) {
   }
   const targetSeats = config.behavior === 'walking' ? 0 : config.behavior === 'seated' ? config.count : Math.round(config.count / 2);
   for (const item of items) {
-    const offsets = item.type === 'chair' ? [0] : item.type === 'couch' ? [-0.64, 0, 0.64] : [];
+    const offsets = item.type === 'chair' ? [0] : (item.type === 'couch' || catalog[item.type]?.kind === 'couch') ? [-0.64, 0, 0.64] : [];
     for (const offset of offsets) {
       if (people.length >= targetSeats) break;
       const c = Math.cos(item.rotation), s = Math.sin(item.rotation);
@@ -44,7 +44,7 @@ export function createCrowd(config, room, items, catalog) {
       // Knees can tuck under a work table, but never under another seat or solid model.
       const kneeObstacles = items.filter(other => other.type !== 'table');
       if (![0.2, 0.4].every(forward => clearPoint(x + s * forward, z + c * forward, room, kneeObstacles, catalog, item, 0.09))) continue;
-      people.push({ x, z, rotation: item.rotation, state: 'seated', seatHeight: item.type === 'couch' ? 0.65 : 0.5 });
+      people.push({ x, z, rotation: item.rotation, state: 'seated', seatHeight: catalog[item.type]?.seatHeight ?? (item.type === 'couch' ? 0.65 : 0.5) });
     }
   }
   // Spread people across the floor reproducibly; one initial occupant per cell.

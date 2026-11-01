@@ -1,3 +1,4 @@
+import { couchModel, refreshmentModel } from './furniture-models.js';
 import { createGuestArrival } from './tour-guests.js';
 import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd } from './crowd.js';
 import { crowdView } from './crowd-view.js';
@@ -6,7 +7,7 @@ import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
 import { MAX_MODEL_BYTES, modelName } from './model-file.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { ROOM, DEFAULT_ROOM, validRoom, bounds, CATALOG, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
+import { ROOM, DEFAULT_ROOM, validRoom, bounds, CATALOG, COUCH_TYPES, isCouch, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 const customModels = new Map();
@@ -200,6 +201,10 @@ function meshFor(item) {
     box(g, d.width, 0.08, d.depth, 0, 0.75, 0, wood);
     for (const x of [-0.84, 0.84]) for (const z of [-0.31, 0.31]) box(g, 0.055, 0.7, 0.055, x, 0.37, z, legs);
     box(g, 1.7, 0.04, 0.04, 0, 0.2, 0, legs);
+  } else if (d.kind === 'couch') {
+    g.add(couchModel(d));
+  } else if (d.kind === 'refreshment') {
+    g.add(refreshmentModel(item.type, d));
   } else if (item.type === 'couch') {
     box(g, 2.3, 0.35, 0.87, 0, 0.35, 0, fabric);
     box(g, 2.3, 0.64, 0.19, 0, 0.63, -0.38, fabric);
@@ -230,7 +235,7 @@ function updateInspector() {
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
   $('layout-name').textContent = eventPlan ? `${ACTIVITIES[eventPlan.activity].name} · ${eventPlan.seated} seats for ${eventPlan.requested} people` : 'Your custom layout';
   $('object-count').textContent = `${items.length} objects`;
-  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs · ${items.filter(i => i.type === "stage").length} stages${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
+  $('furniture-count').textContent = `${items.filter(i => i.type === 'table' || CATALOG[i.type].kind === 'refreshment').length} tables · ${items.filter(i => isCouch(i.type)).length} couches · ${items.filter(i => i.type === 'chair').length} chairs · ${items.filter(i => i.type === "stage").length} stages${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
 }
 function renderItems() {
   // Geometry/materials belong to individual furniture; shared wood and steel stay alive.
@@ -253,6 +258,16 @@ function add(type) { if (items.length >= 200) return status('This prototype supp
 function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = constrain(fn({ ...items[i] })); if (!fitsRoom(next)) return status('This object does not fit at that rotation. Enlarge the room first.'); checkpoint(); eventPlan = null; items[i] = next; renderItems(); }
 function remove() { if (selected === null) return; checkpoint(); eventPlan = null; items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
 function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; crowdConfig = previous.crowdConfig; eventPlan = previous.eventPlan; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
+for (const type of [...COUCH_TYPES, 'coffee', 'tea', 'snacks']) {
+  const d = CATALOG[type], button = document.createElement('button');
+  button.type = 'button'; button.dataset.add = type;
+  const icon = document.createElement('span'); icon.className = 'furniture-swatch';
+  icon.style.setProperty('--fabric', d.color); icon.classList.toggle('station-swatch', d.kind === 'refreshment'); icon.setAttribute('aria-hidden', 'true');
+  const name = document.createElement('strong'); name.textContent = d.name;
+  const size = document.createElement('small'); size.textContent = `${d.width.toFixed(1)} × ${d.depth.toFixed(2)} m`;
+  const plus = document.createElement('b'); plus.textContent = '+';
+  button.append(icon, name, size, plus); $('lounge-catalog').append(button);
+}
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
 $('rotate').onclick = () => changeSelected(i => ({ ...i, rotation: (i.rotation + Math.PI / 4) % (Math.PI * 2) }));
 $('delete').onclick = remove;
@@ -420,7 +435,7 @@ function previewActivity() {
   $('activity-description').textContent = ACTIVITIES[activity].description;
   try {
     const plan = activityLayout(activity, $('attendees').valueAsNumber);
-    $('activity-preview').textContent = `${plan.seated} / ${plan.requested} people seated · ${plan.capacity} seats in this template.` + (plan.shortfall ? ` Short by ${plan.shortfall} seats. Try fewer people or another activity.` : ' Fits this illustrative arrangement.');
+    $('activity-preview').textContent = `${plan.seated} / ${plan.requested} people seated · ${plan.capacity} seats in this template.` + (plan.activity === 'hackathon' ? ` ${plan.items.filter(i => isCouch(i.type)).length} couches · ${plan.items.filter(i => CATALOG[i.type].kind === 'refreshment').length} refreshment tables.` : '') + (plan.shortfall ? ` Short by ${plan.shortfall} seats. Try fewer people or another activity.` : ' Fits this illustrative arrangement.');
     $('activity-preview').dataset.shortfall = String(plan.shortfall > 0);
     $('apply-activity').disabled = false;
     return plan;
