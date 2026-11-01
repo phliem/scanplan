@@ -1,10 +1,13 @@
 import { CATALOG } from './layout.js';
-export const TOUR_DURATION = 38;
+export const TOUR_DURATION = 28;
+export const WALK_START = 9;
+export const WALK_END = 22;
+export const ENTRY_START = 7;
 export const CHAPTERS = [
   { start: 0, title: 'The floor plan', subtitle: 'Every gathering starts with a little perspective.' },
-  { start: 5, title: 'From plan to place', subtitle: 'Brick walls. Steel trusses. Room for possibilities.' },
-  { start: 13, title: 'Step inside', subtitle: 'A view from 1.65 metres above the floor.' },
-  { start: 30, title: 'Take it all in', subtitle: 'Imagine the conversations that could happen here.' },
+  { start: 2, title: 'From plan to place', subtitle: 'Brick walls. Steel trusses. Room for possibilities.' },
+  { start: ENTRY_START, title: 'Step inside', subtitle: 'A view from 1.65 metres above the floor.' },
+  { start: WALK_END, title: 'Take it all in', subtitle: 'Imagine the conversations that could happen here.' },
 ];
 const mix = (a, b, t) => a + (b - a) * t;
 const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
@@ -58,33 +61,55 @@ export function createTour(room, items, aspect = 1) {
   const forward = [entry[0], 1.65, -room.depth / 3];
   function walk(t) {
     // Round grid corners within the extra clearance reserved by the route planner.
-    return blend(along(route, Math.max(0, t - 0.008)), along(route, Math.min(1, t + 0.008)), 0.5);
+    const rounded = blend(along(route, Math.max(0, t - 0.008)), along(route, Math.min(1, t + 0.008)), 0.5);
+    // Preserve exact endpoints so the entrance and final pan have no position jump.
+    const endpoint = t < 0.5 ? route[0] : route.at(-1);
+    return blend(endpoint, rounded, smooth(Math.min(t, 1 - t) / 0.025));
   }
-  return {
-    route, inside,
-    sample(seconds) {
+  function sampleRaw(seconds) {
       const t = Math.max(0, Math.min(TOUR_DURATION, seconds));
       let position, target, fov = 43;
-      if (t < 5) {
-        position = [0, floorHeight * mix(1.04, 1, smooth(t / 5)), 0.01]; target = [0, 0, 0];
-      } else if (t < 10) {
-        const p = smooth((t - 5) / 5); position = blend([0, floorHeight, 0.01], overview, p); target = blend([0, 0, 0], [0, room.eaves / 2, 0], p);
-      } else if (t < 13) {
-        const p = smooth((t - 10) / 3); position = blend(overview, threshold, p); target = blend([0, room.eaves / 2, 0], forward, p); fov = mix(43, 62, p);
-      } else if (t < 16) {
-        const p = smooth((t - 13) / 3); position = blend(threshold, entry, p); target = forward; fov = 62;
-      } else if (t < 30 && inside && route.length > 1) {
-        const p = smooth((t - 16) / 14); position = walk(p); fov = 62;
+      if (t < 2) {
+        position = [0, floorHeight * mix(1.04, 1, smooth(t / 2)), 0.01]; target = [0, 0, 0];
+      } else if (t < 4) {
+        const p = smooth((t - 2) / 2); position = blend([0, floorHeight, 0.01], overview, p); target = blend([0, 0, 0], [0, room.eaves / 2, 0], p);
+      } else if (t < ENTRY_START) {
+        const p = smooth((t - 4) / 3); position = blend(overview, threshold, p); target = blend([0, room.eaves / 2, 0], forward, p); fov = mix(43, 62, p);
+      } else if (t < WALK_START) {
+        const p = smooth((t - ENTRY_START) / 2); position = blend(threshold, entry, p); target = forward; fov = 62;
+      } else if (t < WALK_END && inside && route.length > 1) {
+        const p = smooth((t - WALK_START) / (WALK_END - WALK_START)); position = walk(p); fov = 62;
         const ahead = walk(Math.min(1, p + 0.08));
         target = [ahead[0], 1.65, Math.min(position[2] - 0.7, ahead[2])];
       } else {
         position = last; fov = 62;
         // Pan across the roof structure and turn gently back towards the gathering space.
-        const p = smooth((t - 30) / 8), angle = p * Math.PI * 0.72;
+        const p = smooth((t - WALK_END) / (TOUR_DURATION - WALK_END)), angle = p * Math.PI * 0.72;
         target = [last[0] + Math.sin(angle) * room.width * 0.35, mix(1.65, room.eaves * 0.65, Math.sin(p * Math.PI)), last[2] - Math.cos(angle) * room.depth * 0.25];
       }
       const chapter = [...CHAPTERS].reverse().find(c => t >= c.start);
-      return { position, target, fov, roofOpacity: smooth((t - 10) / 5), structureVisible: t >= 5, chapter };
+      return { position, target, fov, roofOpacity: smooth((t - 4) / 4), structureVisible: t >= 2, chapter };
+  }
+  return {
+    route, inside,
+    sample(seconds) {
+      const t = Math.max(0, Math.min(TOUR_DURATION, seconds));
+      // Blend across chapter boundaries, including the walking path's corners.
+      // Smooth both position and viewing direction: averaging raw look-at points
+      // would give distant targets disproportionate influence and cause a head snap.
+      const position = [0, 0, 0], direction = [0, 0, 0];
+      let weightSum = 0, fov = 0, roofOpacity = 0;
+      for (let i = -20; i <= 20; i++) {
+        const offset = i / 20, weight = (1 + Math.cos(Math.PI * offset)) / 2;
+        const shot = sampleRaw(t + offset * 0.55);
+        const delta = shot.target.map((v, axis) => v - shot.position[axis]);
+        const length = Math.hypot(...delta) || 1;
+        for (let axis = 0; axis < 3; axis++) { position[axis] += shot.position[axis] * weight; direction[axis] += delta[axis] / length * weight; }
+        fov += shot.fov * weight; roofOpacity += shot.roofOpacity * weight; weightSum += weight;
+      }
+      for (let axis = 0; axis < 3; axis++) position[axis] /= weightSum;
+      const length = Math.hypot(...direction) || 1;
+      return { ...sampleRaw(t), up: blend([0, 0, -1], [0, 1, 0], smooth((t - 1) / 5)), position, target: position.map((v, axis) => v + direction[axis] / length * 10), fov: fov / weightSum, roofOpacity: roofOpacity / weightSum };
     },
   };
 }

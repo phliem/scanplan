@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_ROOM, initialLayout } from './dist/layout.js';
-import { createTour, walkingRoute, walkable, TOUR_DURATION } from './dist/tour.js';
+import { createTour, walkingRoute, walkable, TOUR_DURATION, WALK_START, WALK_END, ENTRY_START } from './dist/tour.js';
 test('eye-level route avoids furniture with room to turn', () => {
   const items = initialLayout(), route = walkingRoute(DEFAULT_ROOM, items);
   assert.ok(route.length > 10);
   for (const p of route) assert.equal(walkable(p[0], p[2], DEFAULT_ROOM, items, 0.42), true);
   const tour = createTour(DEFAULT_ROOM, items);
-  for (let t = 16; t <= 30; t += 0.025) {
+  for (let t = WALK_START + 1; t <= WALK_END; t += 0.025) {
     const p = tour.sample(t).position;
-    assert.equal(p[1], 1.65);
+    assert.ok(Math.abs(p[1] - 1.65) < 1e-8);
     assert.ok(walkable(p[0], p[2], DEFAULT_ROOM, items, 0.3), `camera intersects furniture at ${t}`);
   }
 });
@@ -19,7 +19,7 @@ test('tour starts overhead, reveals roof, and ends inside at eye level', () => {
   assert.equal(tour.sample(0).structureVisible, false);
   assert.ok(tour.sample(0).position[1] > DEFAULT_ROOM.ridge);
   assert.equal(tour.sample(20).roofOpacity, 1);
-  assert.equal(tour.sample(TOUR_DURATION).position[1], 1.65);
+  assert.ok(Math.abs(tour.sample(TOUR_DURATION).position[1] - 1.65) < 1e-8);
   for (let t = 0; t <= TOUR_DURATION; t += 0.05) {
     const shot = tour.sample(t);
     assert.ok([...shot.position, ...shot.target, shot.fov].every(Number.isFinite));
@@ -44,4 +44,20 @@ test('blocked entrance falls back to a doorway view', () => {
   assert.equal(tour.inside, false);
   assert.equal(tour.route.length, 0);
   assert.ok(tour.sample(25).position[2] > room.depth / 2);
+});
+test('faster fly-in reaches eye level by ten seconds', () => {
+  const tour = createTour(DEFAULT_ROOM, initialLayout());
+  assert.equal(TOUR_DURATION, 28);
+  assert.ok(Math.abs(tour.sample(10).position[1] - 1.65) < 1e-8);
+});
+test('chapter handoffs blend movement and camera direction without a snap', () => {
+  const tour = createTour(DEFAULT_ROOM, initialLayout()), dt = 0.005;
+  const velocity = t => { const a = tour.sample(t - dt), b = tour.sample(t + dt); return a.position.map((v, i) => (b.position[i] - v) / (2 * dt)); };
+  const direction = shot => { const v = shot.target.map((x, i) => x - shot.position[i]); const length = Math.hypot(...v); return v.map(x => x / length); };
+  for (const t of [2, 4, ENTRY_START, WALK_START, WALK_END]) {
+    const before = velocity(t - dt), after = velocity(t + dt);
+    assert.ok(Math.hypot(...before.map((v, i) => v - after[i])) < 0.4, `velocity jumps at ${t}`);
+    const a = direction(tour.sample(t - dt)), b = direction(tour.sample(t + dt));
+    assert.ok(Math.hypot(...a.map((v, i) => v - b[i])) < 0.025, `view direction jumps at ${t}`);
+  }
 });

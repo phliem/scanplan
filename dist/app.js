@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createTour, TOUR_DURATION } from './tour.js';
+import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { ROOM, DEFAULT_ROOM, CATALOG, constrain, overlaps, validLayout, validRoom, initialLayout } from './layout.js';
 const $ = id => document.getElementById(id);
@@ -238,18 +238,18 @@ function setPlaying(playing) {
 function paintTour() {
   if (!tourState.plan) return;
   const shot = tourState.plan.sample(tourState.time);
-  camera.position.fromArray(shot.position); camera.lookAt(new THREE.Vector3(...shot.target));
+  camera.position.fromArray(shot.position); camera.up.fromArray(shot.up); camera.lookAt(new THREE.Vector3(...shot.target));
   camera.fov = shot.fov; camera.updateProjectionMatrix();
   controls.target.fromArray(shot.target);
   leftWall.visible = rightWall.visible = backWall.visible = true;
   structure.visible = shot.structureVisible;
   roof.visible = shot.roofOpacity > 0.001;
   roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = shot.roofOpacity < 1; mesh.material.opacity = shot.roofOpacity; mesh.material.depthWrite = shot.roofOpacity > 0.95; } });
-  $('viewport').classList.toggle('tour-interior', tourState.time >= 13);
+  $('viewport').classList.toggle('tour-interior', tourState.time >= ENTRY_START);
   if (tourState.chapter !== shot.chapter.title) {
     tourState.chapter = shot.chapter.title;
     $('tour-chapter').textContent = shot.chapter.title;
-    $('tour-description').textContent = !tourState.plan.inside && tourState.time >= 13 ? 'The entrance is blocked by furniture. Enjoy a view from the doorway.' : shot.chapter.subtitle;
+    $('tour-description').textContent = !tourState.plan.inside && tourState.time >= ENTRY_START ? 'The entrance is blocked by furniture. Enjoy a view from the doorway.' : shot.chapter.subtitle;
   }
   const clock = seconds => `0:${String(Math.floor(seconds)).padStart(2, '0')}`;
   $('tour-time').textContent = `${clock(tourState.time)} / ${clock(TOUR_DURATION)}`;
@@ -257,6 +257,7 @@ function paintTour() {
   $('tour-progress').setAttribute('aria-valuetext', `${Math.floor(tourState.time)} seconds of ${TOUR_DURATION}`);
 }
 function startTour() {
+  $('tour-progress').max = TOUR_DURATION;
   selected = null; selectionOutline.visible = false;
   tourState.time = 0; tourState.chapter = ''; tourState.plan = tourPlan();
   controls.enabled = false;
@@ -266,7 +267,7 @@ function startTour() {
 function stopTour() {
   setPlaying(false); tourState.plan = null;
   roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = false; mesh.material.opacity = 1; mesh.material.depthWrite = true; } });
-  camera.fov = 43; camera.updateProjectionMatrix();
+  camera.up.set(0, 1, 0); camera.fov = 43; camera.updateProjectionMatrix();
   $('viewport').classList.remove('tour-interior'); controls.enabled = true;
 }
 $('tour-play').onclick = () => {
