@@ -591,7 +591,7 @@ function frame(now) {
   if (view !== 'video' && !crowdConfig.paused && !document.hidden && crowd.people.length) { advanceCrowd(crowd, dt); paintPeople(crowd); }
   if (view === 'video') {
     if (tourState.playing && !document.hidden && Number.isFinite(now)) {
-      if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + Math.min(0.1, (now - tourState.lastFrame) / 1000));
+      if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + 2 * Math.min(0.1, (now - tourState.lastFrame) / 1000));
       tourState.lastFrame = now;
       if (tourState.time >= TOUR_DURATION) setPlaying(false);
     }

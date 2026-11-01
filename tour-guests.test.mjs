@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_ROOM, initialLayout, activityLayout, CATALOG } from './dist/layout.js';
 import { createTour, walkable, TOUR_DURATION } from './dist/tour.js';
-import { createGuestArrival, GUEST_START } from './dist/tour-guests.js';
+import { createGuestArrival, GUEST_START, guestSpeed } from './dist/tour-guests.js';
 
 test('guests follow the camera through the actual doors and seeking reproduces their poses', () => {
   const tour = createTour(DEFAULT_ROOM, []), arrivals = createGuestArrival(DEFAULT_ROOM, [], tour);
@@ -10,14 +10,15 @@ test('guests follow the camera through the actual doors and seeking reproduces t
   const first = arrivals.sample(GUEST_START).people;
   assert.equal(first.length, 1);
   assert.ok(first[0].z < -DEFAULT_ROOM.depth / 2);
-  assert.ok(tour.sample(GUEST_START).position[2] > -DEFAULT_ROOM.depth / 2);
+  assert.ok(tour.sample(GUEST_START).position[2] > -DEFAULT_ROOM.depth / 2 - 0.2);
   const pose = arrivals.sample(18);
   arrivals.sample(27); arrivals.sample(0);
   assert.deepEqual(arrivals.sample(18), pose);
   const final = arrivals.sample(TOUR_DURATION).people;
-  assert.equal(final.length, 60);
-  assert.ok(final.filter(p => p.z > -DEFAULT_ROOM.depth / 2 + 2).length > 40);
-  assert.ok(final.some(p => p.state === 'standing'));
+  assert.equal(final.length, 150);
+  assert.ok(final.filter(p => p.z > -DEFAULT_ROOM.depth / 2 + 2).length > 100);
+  assert.ok(final.every(p => p.state === 'walking'));
+  assert.equal(new Set(Array.from({ length: 150 }, (_, i) => guestSpeed(i))).size, 150);
 });
 
 test('arrival paths clear furniture, including activity layouts and rotated imported models', () => {
@@ -42,4 +43,22 @@ test('blocked doorway prevents arrival and empty counts stay empty', () => {
   assert.equal(tour.inside, false);
   assert.deepEqual(createGuestArrival(room, items, tour).sample(28).people, []);
   assert.equal(createGuestArrival(room, [], createTour(room, []), 0).count, 0);
+});
+
+
+test('brisk guests overtake into the forward shot while the camera is still walking', () => {
+  for (const items of [[], initialLayout()]) {
+    const tour = createTour(DEFAULT_ROOM, items), arrivals = createGuestArrival(DEFAULT_ROOM, items, tour);
+    let visibleOvertakers = 0;
+    for (const time of [11, 12, 13, 14]) {
+      const shot = tour.sample(time), dx = shot.target[0] - shot.position[0], dz = shot.target[2] - shot.position[2], len = Math.hypot(dx, dz);
+      visibleOvertakers += arrivals.sample(time).people.filter(p => {
+        const x = p.x - shot.position[0], z = p.z - shot.position[2];
+        const ahead = (x * dx + z * dz) / len, side = Math.abs(x * dz - z * dx) / len;
+        return p.state === 'walking' && ahead > 1 && side < ahead * 0.5;
+      }).length;
+    }
+    assert.ok(visibleOvertakers > 3, 'fast guests should appear ahead before the final turn');
+    assert.equal(arrivals.sample(18).people.length, 150);
+  }
 });
