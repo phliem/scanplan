@@ -4,10 +4,10 @@ export const WALK_START = 9;
 export const WALK_END = 22;
 export const ENTRY_START = 7;
 export const CHAPTERS = [
-  { start: 0, title: 'You’re first to arrive', subtitle: 'Fly down towards the warehouse entrance.' },
+  { start: 0, title: 'Your event is already underway', subtitle: 'Fly down towards the warehouse entrance.' },
   { start: 2, title: 'The doors are opening', subtitle: 'Follow the flight through the double doors.' },
   { start: ENTRY_START, title: 'Step inside', subtitle: 'A view from 1.65 metres above the floor.' },
-  { start: WALK_END, title: 'Take it all in', subtitle: 'Your guests follow you in and find their place.' },
+  { start: WALK_END, title: 'Take it all in', subtitle: 'Fifty people are already inside. Look around the gathering.' },
 ];
 const mix = (a, b, t) => a + (b - a) * t;
 const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
