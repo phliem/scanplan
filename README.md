@@ -6,7 +6,7 @@ A browser-only 3D event-layout prototype inspired by the supplied warehouse phot
 
 Run `corepack pnpm dev` from this repository (Node.js 22.13+). No dependency installation is required.
 Open http://localhost:8108. The server reads its port from `project.json`.
-There are no runtime package dependencies. Three.js 0.170.0 and OrbitControls are vendored under `dist/vendor/` with their MIT license so rendering needs no external CDN.
+There are no runtime package dependencies. Three.js 0.170.0, OrbitControls and GLTFLoader are vendored under `dist/vendor/` with their MIT license so rendering needs no external CDN.
 
 ## Use
 
@@ -15,15 +15,17 @@ There are no runtime package dependencies. Three.js 0.170.0 and OrbitControls ar
 - Select **Floor plan** for overhead placement or **Inside** for an eye-level perspective.
 - Drag furniture to move it; optionally snap to a 0.25 m grid. The inspector also accepts coordinates in metres, relative to the room centre.
 - Add tables, couches and chairs from the catalogue; rotate, duplicate or delete selected items. R rotates, Delete removes and Escape deselects.
+- **My library → Upload a 3D model:** choose a `.glb`, edit its name if needed, then **Add GLB to library**. Click the saved model to place it. Models retain their metre scale, are centred on their footprint and rest on the floor; their measured bounds drive selection, collisions and room limits. Uploaded furniture supports dragging, rotation, duplication, deletion from the room and undo/redo.
+- The library stays in IndexedDB in this browser on this device and origin; it is not uploaded to a server or shared between browsers. Clearing site data removes it. Models persist independently of the room reset. Import limits: static GLB 2.0, embedded buffers/textures, 16 MiB per file, 500,000 triangles, 2,000 nodes, 32 models / 128 MiB per library. Animations, skins, cameras, lights, Draco/Meshopt compression, KTX2 and instancing are unsupported. Use dimensions between 1 cm and 60 m wide/deep, up to 20 m high. Models too large for the room remain in the library but cannot be placed; grow the room first. Library-definition removal is not implemented.
 - Undo/redo with the toolbar or Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z. History lasts for the current page session. Reset restores both the original dimensions and furniture and can also be undone.
-- Warehouse dimensions and furniture positions persist in this browser's local storage. Older furniture-only saves remain supported. Export downloads a JSON record, including the current room dimensions. JSON import is not implemented.
+- Warehouse dimensions and furniture positions persist in this browser's local storage. Older furniture-only saves remain supported. Export downloads a version-3 JSON record, including the current room dimensions and the original GLB bytes (base64) for every uploaded model placed in that layout. Unplaced library models are not included; keep their source files. JSON import is not implemented. If model storage cannot be read or a referenced model is missing, layout saving pauses to preserve the existing save; reload after restoring browser storage.
 - Objects stay within the estimated room boundary. Amber outlines warn about overlapping furniture; they do not certify circulation, fire egress, accessibility or capacity. Up to 200 furniture objects are supported.
 
-The source photo and its people are not included or uploaded. All geometry and textures are generated locally. There is no backend, room scanning, or account integration in this first prototype. The UI switches camera perspectives; it does not implement first-person walking controls.
+The source photo and its people are not included or uploaded. Built-in geometry and textures are generated locally; imported GLBs are read locally without external resource requests. There is no backend, room scanning, free-text planning, or account integration in this first prototype. The UI switches camera perspectives; it does not implement first-person walking controls.
 
 ## Verification
 
-`corepack pnpm test` tests rotated boundaries, collision detection, initial furniture placement and saved-layout validation, activity capacity, generated seating counts and non-overlapping arrangements. Browser QA covers the three views, adding, dragging, rotating, editing coordinates, local persistence and history controls.
+`corepack pnpm test` tests rotated boundaries, collision detection, initial furniture placement, saved-layout validation, activity capacity, generated seating counts, non-overlapping arrangements, GLB container checks, external-resource rejection, invalid node hierarchies and custom model footprints. Browser QA covers the three views, adding, dragging, rotating, editing coordinates, local persistence and history controls. GLB browser QA also covers importing the generated Chesterfield, actual dimensions, rotation/duplication/undo, IndexedDB restoration, invalid-file feedback, embedded textures, byte-preserving export and preserving a saved layout when its library is missing.
 
 Static deployment uses `dist/`. The existing private prototype is at https://brickworks-warehouse-planner.lacypixie.chatgpt.site (ChatGPT sign-in required). This repository is independent of the Octo Devlabs monorepo; the original source is preserved there.
 
