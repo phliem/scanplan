@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
 import { MAX_MODEL_BYTES, modelName } from './model-file.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
@@ -256,23 +257,82 @@ function exportedModels() {
   });
 }
 $('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, eventPlan, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '' };
+function tourPlan() { return createTour(ROOM, items, camera.aspect); }
+function setPlaying(playing) {
+  tourState.playing = playing; tourState.lastFrame = null;
+  $('tour-play').textContent = playing ? 'Ⅱ' : '▶';
+  $('tour-play').setAttribute('aria-label', playing ? 'Pause tour' : 'Play tour');
+}
+function paintTour() {
+  if (!tourState.plan) return;
+  const shot = tourState.plan.sample(tourState.time);
+  camera.position.fromArray(shot.position); camera.up.fromArray(shot.up); camera.lookAt(new THREE.Vector3(...shot.target));
+  camera.fov = shot.fov; camera.updateProjectionMatrix();
+  controls.target.fromArray(shot.target);
+  leftWall.visible = rightWall.visible = backWall.visible = true;
+  structure.visible = shot.structureVisible;
+  roof.visible = shot.roofOpacity > 0.001;
+  roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = shot.roofOpacity < 1; mesh.material.opacity = shot.roofOpacity; mesh.material.depthWrite = shot.roofOpacity > 0.95; } });
+  $('viewport').classList.toggle('tour-interior', tourState.time >= ENTRY_START);
+  if (tourState.chapter !== shot.chapter.title) {
+    tourState.chapter = shot.chapter.title;
+    $('tour-chapter').textContent = shot.chapter.title;
+    $('tour-description').textContent = !tourState.plan.inside && tourState.time >= ENTRY_START ? 'The entrance is blocked by furniture. Enjoy a view from the doorway.' : shot.chapter.subtitle;
+  }
+  const clock = seconds => `0:${String(Math.floor(seconds)).padStart(2, '0')}`;
+  $('tour-time').textContent = `${clock(tourState.time)} / ${clock(TOUR_DURATION)}`;
+  $('tour-progress').value = tourState.time;
+  $('tour-progress').setAttribute('aria-valuetext', `${Math.floor(tourState.time)} seconds of ${TOUR_DURATION}`);
+}
+function startTour() {
+  $('tour-progress').max = TOUR_DURATION;
+  selected = null; selectionOutline.visible = false;
+  tourState.time = 0; tourState.chapter = ''; tourState.plan = tourPlan();
+  controls.enabled = false;
+  setPlaying(!window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  paintTour();
+}
+function stopTour() {
+  setPlaying(false); tourState.plan = null;
+  roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = false; mesh.material.opacity = 1; mesh.material.depthWrite = true; } });
+  camera.up.set(0, 1, 0); camera.fov = 43; camera.updateProjectionMatrix();
+  $('viewport').classList.remove('tour-interior'); controls.enabled = true;
+}
+$('tour-play').onclick = () => {
+  if (tourState.time >= TOUR_DURATION) tourState.time = 0;
+  setPlaying(!tourState.playing); paintTour();
+};
+$('tour-replay').onclick = () => { tourState.time = 0; setPlaying(true); paintTour(); };
+$('tour-progress').oninput = e => { setPlaying(false); tourState.time = e.target.valueAsNumber; paintTour(); };
+$('tour-explore').onclick = () => {
+  const position = camera.position.clone(), target = controls.target.clone();
+  setView('inside'); camera.position.copy(position); controls.target.copy(target); controls.update();
+};
+document.addEventListener('visibilitychange', () => { tourState.lastFrame = null; });
+
 function setView(name) {
+  if (view === 'video') stopTour();
   view = name;
-  for (const key of ['orbit', 'top', 'inside']) $('view-' + key).classList.toggle('active', name === key);
-  document.querySelector('.canvas-label').style.display = name === 'inside' ? 'none' : '';
+  document.querySelector('main').classList.toggle('video-mode', name === 'video');
+  $('tour-overlay').hidden = name !== 'video';
+  for (const key of ['orbit', 'top', 'inside', 'video']) $('view-' + key).classList.toggle('active', name === key);
+  document.querySelector('.canvas-label').style.display = name === 'inside' || name === 'video' ? 'none' : '';
+  if (name === 'video') { startTour(); return; }
   controls.enableRotate = name !== 'top'; controls.maxPolarAngle = Math.PI / 2 - 0.015;
   fitCamera();
   roof.visible = name === 'inside'; $('roof').checked = roof.visible;
   controls.update();
 }
 function fitCamera() {
+  if (view === 'video') { tourState.plan = tourPlan(); paintTour(); return; }
   const name = view;
   if (name === 'top') { camera.position.set(0, Math.max(ROOM.depth, ROOM.width / camera.aspect) * 1.7, 0.01); controls.target.set(0, 0, 0); }
   else if (name === 'inside') { camera.position.set(0, 1.7, ROOM.depth / 2 - 1.4); controls.target.set(0, 1.7, -ROOM.depth / 3); }
   else { const vertical = THREE.MathUtils.degToRad(camera.fov), horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect); const radius = Math.hypot(ROOM.width, ROOM.depth, ROOM.ridge) / 2; const distance = radius / Math.sin(Math.min(vertical, horizontal) / 2) * 1.03; controls.target.set(0, ROOM.ridge / 3, 0); camera.position.copy(new THREE.Vector3(0.55, 0.52, 0.74).normalize().multiplyScalar(distance).add(controls.target)); }
   controls.update();
 }
-for (const name of ['orbit', 'top', 'inside']) $('view-' + name).onclick = () => setView(name);
+for (const name of ['orbit', 'top', 'inside', 'video']) $('view-' + name).onclick = () => setView(name);
 $('home').onclick = () => setView(view);
 function zoom(factor) { camera.position.sub(controls.target).multiplyScalar(factor).add(controls.target); controls.update(); }
 $('zoom-in').onclick = () => zoom(0.8); $('zoom-out').onclick = () => zoom(1.25);
@@ -282,7 +342,7 @@ let drag = null;
 function point(event) { const r = renderer.domElement.getBoundingClientRect(); pointer.set((event.clientX - r.left) / r.width * 2 - 1, -(event.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(pointer, camera); return ray.ray.intersectPlane(floor, new THREE.Vector3()); }
 function hit() { const result = ray.intersectObjects(furniture.children, true)[0]; if (!result) return null; let g = result.object; while (g.parent !== furniture) g = g.parent; return g.userData.id; }
 renderer.domElement.addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
+  if (view === 'video' || e.button !== 0) return;
   const p = point(e), id = hit();
   if (id === null) { selected = null; updateInspector(); return; }
   selected = id; updateInspector(); if (!p) return;
@@ -291,6 +351,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
   controls.enabled = false; renderer.domElement.setPointerCapture(e.pointerId); e.stopImmediatePropagation();
 }, true);
 renderer.domElement.addEventListener('pointermove', e => {
+  if (view === 'video') return;
   const p = point(e);
   if (!drag) { renderer.domElement.style.cursor = hit() !== null ? 'grab' : 'default'; return; }
   if (!p) return;
@@ -306,7 +367,12 @@ function endDrag() { if (!drag) return; drag = null; controls.enabled = true; sa
 renderer.domElement.addEventListener('pointerup', endDrag); renderer.domElement.addEventListener('pointercancel', endDrag); renderer.domElement.addEventListener('lostpointercapture', endDrag);
 window.addEventListener('keydown', e => {
   if (!startupReady) return;
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement.tagName)) return;
+  if (view === 'video') {
+    if (e.code === 'Space') { e.preventDefault(); $('tour-play').click(); }
+    if (e.key === 'Escape') setView('inside');
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? history(redoStack, undoStack) : history(undoStack, redoStack); }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove(); }
   if (e.key.toLowerCase() === 'r') $('rotate').click();
@@ -418,9 +484,18 @@ if (!restored) setItems(initialLayout());
 previewActivity();
 startupReady = true; document.querySelector('main').inert = false; $('export').disabled = false; save();
 setView('orbit'); $('loading').remove();
-new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); fitCamera(); }).observe(viewport);
-function frame() {
-  requestAnimationFrame(frame); controls.update();
+new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); if (view !== 'inside') fitCamera(); }).observe(viewport);
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (view === 'video') {
+    if (tourState.playing && !document.hidden && Number.isFinite(now)) {
+      if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + Math.min(0.1, (now - tourState.lastFrame) / 1000));
+      tourState.lastFrame = now;
+      if (tourState.time >= TOUR_DURATION) setPlaying(false);
+    }
+    paintTour(); renderer.render(scene, camera); return;
+  }
+  controls.update();
   const inside = view === 'inside';
   leftWall.visible = inside || camera.position.x > -1;
   rightWall.visible = inside || camera.position.x < 1;
