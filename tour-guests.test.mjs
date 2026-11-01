@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_ROOM, initialLayout, activityLayout, CATALOG } from './dist/layout.js';
 import { createTour, walkable, TOUR_DURATION } from './dist/tour.js';
-import { createGuestArrival, GUEST_START } from './dist/tour-guests.js';
+import { createGuestArrival, GUEST_START, guestSpeed } from './dist/tour-guests.js';
 
 test('guests follow the camera through the actual doors and seeking reproduces their poses', () => {
   const tour = createTour(DEFAULT_ROOM, []), arrivals = createGuestArrival(DEFAULT_ROOM, [], tour);
@@ -15,9 +15,10 @@ test('guests follow the camera through the actual doors and seeking reproduces t
   arrivals.sample(27); arrivals.sample(0);
   assert.deepEqual(arrivals.sample(18), pose);
   const final = arrivals.sample(TOUR_DURATION).people;
-  assert.equal(final.length, 200);
-  assert.ok(final.filter(p => p.z > -DEFAULT_ROOM.depth / 2 + 2).length > 150);
-  assert.ok(final.some(p => p.state === 'standing'));
+  assert.equal(final.length, 150);
+  assert.ok(final.filter(p => p.z > -DEFAULT_ROOM.depth / 2 + 2).length > 100);
+  assert.ok(final.every(p => p.state === 'walking'));
+  assert.equal(new Set(Array.from({ length: 150 }, (_, i) => guestSpeed(i))).size, 150);
 });
 
 test('arrival paths clear furniture, including activity layouts and rotated imported models', () => {
@@ -58,6 +59,6 @@ test('brisk guests overtake into the forward shot while the camera is still walk
       }).length;
     }
     assert.ok(visibleOvertakers > 3, 'fast guests should appear ahead before the final turn');
-    assert.equal(arrivals.sample(18).people.length, 200);
+    assert.equal(arrivals.sample(18).people.length, 150);
   }
 });

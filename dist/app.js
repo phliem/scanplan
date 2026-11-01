@@ -287,7 +287,7 @@ $('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3
 const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '', guests: null };
 function tourPlan() {
   const plan = createTour(ROOM, items, camera.aspect);
-  tourState.guests = createGuestArrival(ROOM, items, plan, 200);
+  tourState.guests = createGuestArrival(ROOM, items, plan, 150);
   return plan;
 }
 function setPlaying(playing) {
