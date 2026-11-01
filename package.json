@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
-    "test": "node --test layout.test.mjs"
+    "test": "node --test *.test.mjs"
   },
   "packageManager": "pnpm@12.3.4",
   "engines": {

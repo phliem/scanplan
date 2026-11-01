@@ -1,8 +1,12 @@
 import * as THREE from 'three';
+import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
+import { MAX_MODEL_BYTES, modelName } from './model-file.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { ROOM, DEFAULT_ROOM, CATALOG, constrain, overlaps, validLayout, validRoom, initialLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
+const customModels = new Map();
+let libraryDB = null, libraryReady = false, startupReady = false;
 let renderer;
 try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false }); }
 catch { $('loading').textContent = '3D needs WebGL. Please open this page in a browser with hardware acceleration enabled.'; throw new Error('WebGL unavailable'); }
@@ -149,10 +153,15 @@ const furniture = new THREE.Group(); scene.add(furniture);
 let items = [], selected = null, nextId = 1, undoStack = [], redoStack = [], view = 'orbit';
 
 function status(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(status.timer); status.timer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
-function save() { try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 2, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
+function save() { if (!libraryReady || !startupReady) { $('save-state').textContent = 'Saving paused — reload to restore your library'; return; } try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 2, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
 function snapshot() { return structuredClone({ room: ROOM, items }); }
 function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack = []; }
 function meshFor(item) {
+  const model = customModels.get(item.type);
+  if (model) {
+    const g = new THREE.Group(); g.userData.id = item.id; g.userData.customModel = true;
+    g.add(model.template.clone(true)); g.position.set(item.x, 0, item.z); g.rotation.y = item.rotation; return g;
+  }
   const g = new THREE.Group(); g.userData.id = item.id;
   const d = CATALOG[item.type], fabric = mat(d.color), legs = steel;
   if (item.type === 'table') {
@@ -188,21 +197,23 @@ function updateInspector() {
   }
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
   $('object-count').textContent = `${items.length} objects`;
-  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs`;
+  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
 }
 function renderItems() {
   // Geometry/materials belong to individual furniture; shared wood and steel stay alive.
-  for (const child of [...furniture.children]) { child.traverse(m => { if (m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
+  for (const child of [...furniture.children]) { child.traverse(m => { if (!child.userData.customModel && m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
   for (const item of items) furniture.add(meshFor(item)); updateInspector(); save();
 }
 function setItems(data) { items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
 function findSpot(type, preferred, rotation = 0) {
+  const d = CATALOG[type], c = Math.abs(Math.cos(rotation)), s = Math.abs(Math.sin(rotation));
+  if (d.width * c + d.depth * s > ROOM.width - 0.3 || d.width * s + d.depth * c > ROOM.depth - 0.3 || d.height > ROOM.eaves) return null;
   const candidates = preferred ? [preferred] : [];
   for (let z = 0; z <= ROOM.depth / 2 - 0.5; z += 1.5) for (let x = -ROOM.width / 2 + 1.5; x <= ROOM.width / 2 - 1.5; x += 1.5) for (const sign of z ? [1, -1] : [1]) candidates.push({ x, z: z * sign });
   return candidates.map(p => constrain({ type, ...p, rotation })).find(p => items.every(i => !overlaps(p, i)));
 }
 function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
-function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; checkpoint(); items[i] = constrain(fn({ ...items[i] })); renderItems(); }
+function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = fn({ ...items[i] }), d = CATALOG[next.type], c = Math.abs(Math.cos(next.rotation)), s = Math.abs(Math.sin(next.rotation)); if (d.width * c + d.depth * s > ROOM.width - 0.3 || d.width * s + d.depth * c > ROOM.depth - 0.3) { return status('This object does not fit at that rotation.'); } checkpoint(); items[i] = constrain(next); renderItems(); }
 function remove() { if (selected === null) return; checkpoint(); items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
 function history(from, to) { if (!from.length) return; to.push(snapshot()); const state = from.pop(); Object.assign(ROOM, state.room); items = state.items; selected = null; buildRoom(); renderItems(); setView(view); }
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
@@ -217,6 +228,7 @@ $('room-form').onsubmit = e => {
   const room = Object.fromEntries(['width', 'depth', 'eaves', 'ridge'].map(key => [key, $('room-' + key).valueAsNumber]));
   if (!validRoom(room)) { $('room-error').textContent = 'Use width/length 6–60 m, wall height 3–15 m, and a roof peak at least 0.5 m higher (up to 20 m).'; return; }
   if (Object.keys(room).every(key => room[key] === ROOM[key])) return;
+  if (items.some(i => { const d = CATALOG[i.type], c = Math.abs(Math.cos(i.rotation)), s = Math.abs(Math.sin(i.rotation)); return d.width * c + d.depth * s > room.width - 0.3 || d.width * s + d.depth * c > room.depth - 0.3 || d.height > room.eaves; })) { $('room-error').textContent = 'Remove furniture that is too large for these dimensions before resizing.'; return; }
   checkpoint(); Object.assign(ROOM, room);
   let moved = 0;
   items = items.map(item => { const next = constrain(item); if (next.x !== item.x || next.z !== item.z) moved++; return next; });
@@ -226,7 +238,15 @@ $('room-form').onsubmit = e => {
   status(moved ? `Room resized. ${moved} objects moved inside the boundary.` : 'Warehouse dimensions updated');
 };
 $('roof').onchange = e => roof.visible = e.target.checked;
-$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 2, units: 'metres', approximate: true, room: ROOM, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+function exportedModels() {
+  return [...new Set(items.map(i => i.type))].filter(type => customModels.has(type)).map(type => {
+    const { record } = customModels.get(type); let binary = '';
+    const bytes = new Uint8Array(record.bytes);
+    for (let offset = 0; offset < bytes.length; offset += 16384) binary += String.fromCharCode(...bytes.subarray(offset, offset + 16384));
+    return { id: type, name: record.name, filename: record.filename, glbBase64: btoa(binary) };
+  });
+}
+$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
 function setView(name) {
   view = name;
   for (const key of ['orbit', 'top', 'inside']) $('view-' + key).classList.toggle('active', name === key);
@@ -276,15 +296,64 @@ renderer.domElement.addEventListener('pointermove', e => {
 function endDrag() { if (!drag) return; drag = null; controls.enabled = true; save(); renderer.domElement.style.cursor = 'grab'; }
 renderer.domElement.addEventListener('pointerup', endDrag); renderer.domElement.addEventListener('pointercancel', endDrag); renderer.domElement.addEventListener('lostpointercapture', endDrag);
 window.addEventListener('keydown', e => {
+  if (!startupReady) return;
   if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? history(redoStack, undoStack) : history(undoStack, redoStack); }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove(); }
   if (e.key.toLowerCase() === 'r') $('rotate').click();
   if (e.key === 'Escape') { selected = null; updateInspector(); }
 });
+function registerModel(record, model) {
+  customModels.set(record.id, { ...model, record });
+  CATALOG[record.id] = { name: record.name, width: model.width, depth: model.depth, height: model.height };
+  const button = document.createElement('button'); button.type = 'button';
+  const name = document.createElement('strong'); name.textContent = record.name;
+  const size = document.createElement('small'); size.textContent = `${model.width.toFixed(2)} × ${model.depth.toFixed(2)} × ${model.height.toFixed(2)} m`;
+  const plus = document.createElement('b'); plus.textContent = '+'; plus.setAttribute('aria-hidden', 'true');
+  button.append(name, size, plus); button.onclick = () => add(record.id); $('custom-models').append(button);
+}
+$('model-file').onchange = () => {
+  const file = $('model-file').files[0]; if (file) $('model-name').value = modelName(file.name);
+};
+$('model-upload').onsubmit = async event => {
+  event.preventDefault();
+  if ($('upload-model').disabled) return;
+  const file = $('model-file').files[0]; if (!file) return;
+  if (!/\.glb$/i.test(file.name)) { $('library-status').textContent = 'Choose a .glb file.'; return; }
+  if (file.size > MAX_MODEL_BYTES) { $('library-status').textContent = 'GLB files must be 16 MB or smaller.'; return; }
+  $('upload-model').disabled = true; $('library-status').textContent = 'Checking and saving your model…';
+  let model, registered = false;
+  try {
+    if (!libraryDB) libraryDB = await openLibrary();
+    const bytes = await file.arrayBuffer(); model = await loadModel(bytes);
+    const record = { id: 'model_' + crypto.randomUUID(), name: $('model-name').value.trim().slice(0, 80) || modelName(file.name), filename: file.name, bytes };
+    await storeModel(libraryDB, record);
+    registerModel(record, model); registered = true;
+    $('model-upload').reset(); $('library-status').textContent = `${record.name} saved. Click it below to add it to the room.`;
+    status('Model added to your library');
+  } catch (error) {
+    if (model && !registered) disposeModel(model.template);
+    $('library-status').textContent = error.message?.startsWith('THREE.') ? 'This GLB could not be loaded. Export a static, uncompressed GLB with embedded textures.' : error.message || 'Could not import this GLB. Try exporting it again.';
+  } finally { $('upload-model').disabled = false; }
+};
+// Do not overwrite a saved layout if its model library cannot be restored.
+try {
+  libraryDB = await openLibrary();
+  const records = await readModels(libraryDB);
+  for (const record of records) {
+    if (!/^model_[a-f0-9-]+$/.test(record.id) || typeof record.name !== 'string') throw new Error('Invalid model record.');
+    registerModel(record, await loadModel(record.bytes));
+  }
+  libraryReady = true;
+  if (records.length) $('library-status').textContent = `${records.length} saved model${records.length === 1 ? '' : 's'}. Click one to add it.`;
+} catch {
+  libraryReady = false;
+  $('library-status').textContent = 'Model storage could not be opened. Reload to retry; your saved layout will be preserved.';
+}
 let restored = false;
-try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); if (Array.isArray(data) && validLayout(data)) { setItems(data); restored = true; } else if (data && validRoom(data.room) && validLayout(data.furniture)) { Object.assign(ROOM, data.room); buildRoom(); setItems(data.furniture); restored = true; } } } catch { }
+try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); const savedItems = Array.isArray(data) ? data : data?.furniture; if (Array.isArray(savedItems) && savedItems.some(i => typeof i?.type === 'string' && i.type.startsWith('model_') && !customModels.has(i.type))) { libraryReady = false; $('library-status').textContent = 'A saved model is missing. Saving is paused to preserve your layout. Restore the browser library or reload after reopening storage.'; } if (Array.isArray(data) && validLayout(data)) { setItems(data); restored = true; } else if (data && validRoom(data.room) && validLayout(data.furniture)) { Object.assign(ROOM, data.room); buildRoom(); setItems(data.furniture); restored = true; } } } catch { }
 if (!restored) setItems(initialLayout());
+startupReady = true; document.querySelector('main').inert = false; $('export').disabled = false; save();
 setView('orbit'); $('loading').remove();
 new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); fitCamera(); }).observe(viewport);
 function frame() {
