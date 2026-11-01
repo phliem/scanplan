@@ -60,7 +60,7 @@ export function initialLayout() {
 }
 
 export const ACTIVITIES = {
-  hackathon: { name: 'Hackathon', description: '100 desk seats, eight colourful couch designs, plus coffee, tea and snacks in the default venue. Central aisle between team tables.' },
+  hackathon: { name: 'Hackathon', description: '150 desk seats spread across the default venue, eight colourful couches along the side walls, plus coffee, tea and snacks.' },
   theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
 };
 
@@ -74,28 +74,44 @@ export function activityLayout(activity, requested, room = ROOM) {
   const add = (type, x, z, rotation = 0) => items.push(constrain({ type, x, z, rotation }, room));
   let capacity;
   if (activity === 'hackathon') {
-    // Reserve the entrance end for a lounge and refreshments when the room
-    // can fit the full amenity area. Smaller rooms keep honest desk shortfalls.
     const lounge = room.width >= 11 && room.depth >= 18;
+    const seatsPerTable = 6;
     if (lounge) {
-      const end = room.depth / 2;
-      const xs = [-4.3, -1.7, 1.7, 4.3];
-      COUCH_TYPES.forEach((type, i) => add(type, xs[i % 4], end - (i < 4 ? 3.35 : 1.2), i < 4 ? 0 : Math.PI));
-      ['coffee', 'tea', 'snacks'].forEach((type, i) => add(type, [-4.3, -2.4, 4.3][i], end - 4.9));
+      // Four couches down each side, with tables using the full room length.
+      COUCH_TYPES.forEach((type, i) => {
+        const side = i < 4 ? -1 : 1;
+        const z = (i % 4 / 3 - 0.5) * (room.depth - 7.6);
+        add(type, side * (room.width / 2 - 0.7), z, -side * Math.PI / 2);
+      });
     }
+    // Leave a clear entry apron before the first chairs.
+    const firstZ = -room.depth / 2 + 2.1, lastZ = room.depth / 2 - 1.4;
+    const rows = Math.max(1, Math.floor((lastZ - firstZ) / 2.3) + 1);
     const columns = [];
-    for (let x = 1.9; x <= room.width / 2 - 1.15 + 1e-9; x += 2.2) columns.push(-x, x);
-    columns.sort((a, b) => a - b);
-    const maxTables = Math.floor((200 - items.length) / 5);
-    const lastZ = room.depth / 2 - (lounge ? 6.7 : 2.3);
-    for (let z = -room.depth / 2 + 1.4; z <= lastZ + 1e-9; z += lounge ? 2.3 : 2.9)
-      for (const x of columns) if (slots.length < maxTables) slots.push({ x, z });
-    capacity = slots.length * 4; // Desk seats only; lounge seats are additional.
+    const outerX = room.width / 2 - (lounge ? 2.4 : 1.15);
+    const columnCount = Math.max(1, Math.floor(outerX * 2 / 3.1) + 1);
+    for (let col = 0; col < columnCount; col++) columns.push(columnCount === 1 ? 0 : -outerX + col * 2 * outerX / (columnCount - 1));
+    for (let row = 0; row < rows; row++) for (let col = 0; col < columns.length; col++) {
+      // Two end bays become refreshment areas instead of desk islands.
+      if (lounge && row === rows - 1 && (col === 0 || col === columns.length - 1)) continue;
+      slots.push({ x: columns[col], z: rows === 1 ? 0 : firstZ + row * (lastZ - firstZ) / (rows - 1) });
+    }
+    if (lounge) {
+      add('coffee', columns[0], lastZ - 0.5);
+      add('tea', columns[0], lastZ + 0.5);
+      add('snacks', columns.at(-1), lastZ);
+    }
+    const maxTables = Math.min(slots.length, Math.floor((200 - items.length) / (seatsPerTable + 1)));
+    capacity = maxTables * seatsPerTable; // Lounge seats are additional.
     let remaining = Math.min(requested, capacity);
-    for (const { x, z } of slots) {
-      if (!remaining) break;
+    const tableCount = Math.ceil(remaining / seatsPerTable);
+    // Sample across the whole grid, even for smaller groups, instead of filling
+    // from the entrance and leaving the far half empty.
+    for (let i = 0; i < tableCount; i++) {
+      const index = tableCount === 1 ? Math.floor((slots.length - 1) / 2) : Math.round(i * (slots.length - 1) / (tableCount - 1));
+      const { x, z } = slots[index];
       add('table', x, z);
-      for (const dz of [-0.85, 0.85]) for (const dx of [-0.6, 0.6]) {
+      for (const dz of [-0.85, 0.85]) for (const dx of [-0.67, 0, 0.67]) {
         if (!remaining) break;
         add('chair', x + dx, z + dz, dz < 0 ? 0 : Math.PI);
         remaining--;

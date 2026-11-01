@@ -36,7 +36,7 @@ test('collision axes match Three.js rotations beyond 45 degree steps', () => {
 
 test('activity layouts seat requested guests within bounds without overlaps', async () => {
   const { activityLayout } = await import('./dist/layout.js');
-  for (const activity of ['hackathon', 'theatre']) for (const requested of [1, 3, 4, 5, 80, 100, 112, 180, 1000]) {
+  for (const activity of ['hackathon', 'theatre']) for (const requested of [1, 3, 4, 5, 80, 100, 112, 150, 180, 1000]) {
     const plan = activityLayout(activity, requested);
     assert.ok(validLayout(plan.items));
     assert.equal(plan.seated, Math.min(requested, plan.capacity));

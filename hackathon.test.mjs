@@ -2,27 +2,37 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from './dist/vendor/three.module.js';
 import { activityLayout, DEFAULT_ROOM, CATALOG, COUCH_TYPES, isCouch } from './dist/layout.js';
+import { createTour } from './dist/tour.js';
 import { createCrowd } from './dist/crowd.js';
 import { couchModel, refreshmentModel } from './dist/furniture-models.js';
 
-test('100-person hackathon includes 25 desks, 100 chairs, eight different couches and three stations', () => {
-  const plan = activityLayout('hackathon', 100);
-  assert.equal(plan.seated, 100); assert.equal(plan.shortfall, 0);
+test('150-person hackathon includes 25 desks, 150 chairs, eight different couches and three stations', () => {
+  const plan = activityLayout('hackathon', 150);
+  assert.equal(plan.seated, 150); assert.equal(plan.shortfall, 0);
   assert.equal(plan.items.filter(i => i.type === 'table').length, 25);
-  assert.equal(plan.items.filter(i => i.type === 'chair').length, 100);
+  assert.equal(plan.items.filter(i => i.type === 'chair').length, 150);
   assert.deepEqual(plan.items.filter(i => isCouch(i.type)).map(i => i.type), COUCH_TYPES);
   for (const type of ['coffee', 'tea', 'snacks']) assert.equal(plan.items.filter(i => i.type === type).length, 1);
-  // The whole centre strip stays free, including the lounge and entrance.
-  for (const item of plan.items) assert.ok(Math.abs(item.x) - CATALOG[item.type].width / 2 >= 0.64);
+  const desks = plan.items.filter(i => i.type === 'table');
+  assert.ok(Math.min(...desks.map(i => i.z)) < -8.8);
+  assert.ok(Math.max(...desks.map(i => i.z)) > 9);
+  assert.equal(new Set(desks.map(i => i.x)).size, 3);
+  const couches = plan.items.filter(i => isCouch(i.type));
+  assert.equal(couches.filter(i => i.x < 0).length, 4);
+  assert.equal(couches.filter(i => i.x > 0).length, 4);
+  assert.ok(Math.max(...couches.map(i => i.z)) - Math.min(...couches.map(i => i.z)) > 14);
   const roundTrip = JSON.parse(JSON.stringify(plan));
   assert.deepEqual(roundTrip, plan);
 });
 
-test('all 100 desk seats and 24 extra lounge seats are usable by the crowd', () => {
-  const plan = activityLayout('hackathon', 100);
-  for (const count of [100, 124]) {
-    const crowd = createCrowd({ count, behavior: 'seated', paused: false }, DEFAULT_ROOM, plan.items, CATALOG);
-    assert.equal(crowd.seated, count); assert.equal(crowd.standing, 0);
+test('all 150 desk seats and 24 extra lounge seats are usable by the crowd', () => {
+  for (const room of [DEFAULT_ROOM, { width: 16, depth: 28, eaves: 6, ridge: 9 }]) {
+    const plan = activityLayout('hackathon', 150, room);
+    for (const count of [150, 174]) {
+      const crowd = createCrowd({ count, behavior: 'seated', paused: false }, room, plan.items, CATALOG);
+      assert.equal(crowd.seated, count); assert.equal(crowd.standing, 0);
+    }
+    assert.ok(createTour(room, plan.items).inside, 'The tour can still enter the room');
   }
 });
 
@@ -39,4 +49,16 @@ test('generated models stay inside declared selection and collision footprints',
   }
   assert.equal(silhouettes.size, 8);
   assert.equal(new Set(COUCH_TYPES.map(t => CATALOG[t].color)).size, 8);
+});
+
+test('smaller hackathons still distribute desks to both ends and both sides', () => {
+  for (const requested of [6, 24, 60, 100]) {
+    const plan = activityLayout('hackathon', requested);
+    const desks = plan.items.filter(i => i.type === 'table');
+    if (desks.length > 1) {
+      assert.ok(desks.some(i => i.z < -8.8) && desks.some(i => i.z > 9));
+      assert.ok(desks.some(i => i.x < 0) && desks.some(i => i.x > 0));
+    }
+    assert.equal(plan.items.filter(i => i.type === 'chair').length, requested);
+  }
 });

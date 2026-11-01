@@ -168,7 +168,7 @@ const paintPeople = crowdView(scene);
 function rebuildPeople(preservePositions = false) {
   if (!preservePositions) crowd = createCrowd(crowdConfig, ROOM, items, CATALOG);
   paintPeople(crowd);
-  $('people-count').value = crowdConfig.count || 100; $('people-behavior').value = crowdConfig.behavior;
+  $('people-count').value = crowdConfig.count || 150; $('people-behavior').value = crowdConfig.behavior;
   $('people-pause').disabled = !crowd.people.length; $('people-clear').disabled = !crowdConfig.count;
   $('people-pause').textContent = crowdConfig.paused ? 'Resume people' : 'Pause people';
   $('people-pause').setAttribute('aria-pressed', String(crowdConfig.paused));
