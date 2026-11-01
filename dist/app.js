@@ -1,6 +1,6 @@
 import { clearCameraView } from './tour-guest-clearance.js';
 import { couchModel, refreshmentModel } from './furniture-models.js';
-import { createGuestArrival } from './tour-guests.js';
+import { createTourOccupants } from './tour-occupants.js';
 import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd } from './crowd.js';
 import { crowdView } from './crowd-view.js';
 import * as THREE from 'three';
@@ -305,7 +305,7 @@ $('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3
 const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '', guests: null };
 function tourPlan() {
   const plan = createTour(ROOM, items, camera.aspect);
-  tourState.guests = createGuestArrival(ROOM, items, plan, 150);
+  tourState.guests = createTourOccupants(ROOM, items);
   return plan;
 }
 function setPlaying(playing) {
