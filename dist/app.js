@@ -1,3 +1,4 @@
+import { clearCameraView } from './tour-guest-clearance.js';
 import { couchModel, refreshmentModel } from './furniture-models.js';
 import { createGuestArrival } from './tour-guests.js';
 import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd } from './crowd.js';
@@ -317,8 +318,8 @@ function paintTour() {
   const shot = tourState.plan.sample(tourState.time);
   for (const { hinge, side } of entranceDoors) hinge.rotation.y = side * shot.doorOpen * Math.PI * 0.53;
   const arrivals = tourState.guests.sample(tourState.time);
-  // Keep the lens clear while guests follow the same aisles as the camera.
-  paintPeople({ people: arrivals.people.filter(p => Math.hypot(p.x - shot.position[0], p.z - shot.position[2]) > 1) });
+  // Let guests pass at the sides, with clearance for their bodies and arms.
+  paintPeople({ people: clearCameraView(arrivals.people, shot, ROOM, items) });
   camera.position.fromArray(shot.position); camera.up.fromArray(shot.up); camera.lookAt(new THREE.Vector3(...shot.target));
   camera.fov = shot.fov; camera.updateProjectionMatrix();
   controls.target.fromArray(shot.target);
