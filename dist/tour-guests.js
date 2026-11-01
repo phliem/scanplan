@@ -1,8 +1,8 @@
 import { walkable, WALK_START } from './tour.js';
 
-export const GUEST_START = WALK_START + 0.5;
+export const GUEST_START = WALK_START - 0.5;
 // Paths and poses depend only on film time, so seeking never accumulates simulation drift.
-export function createGuestArrival(room, items, tour, count = 60) {
+export function createGuestArrival(room, items, tour, count = 200) {
   if (!tour.inside) return { sample: () => ({ people: [] }), count: 0 };
   const entry = tour.route[0], step = 0.4, cells = [{ x: entry[0], z: entry[2], parent: null }];
   const seen = new Set(['0,0']);
@@ -26,7 +26,10 @@ export function createGuestArrival(room, items, tour, count = 60) {
     const j = Math.floor(seed / 4294967296 * (i + 1));
     [destinations[i], destinations[j]] = [destinations[j], destinations[i]];
   }
-  const paths = destinations.slice(0, Math.min(500, count)).map(destination => {
+  const end = tour.route.at(-1);
+  const briskDestinations = [...destinations].sort((a, b) => Math.hypot(a.x - end[0], a.z - end[2]) - Math.hypot(b.x - end[0], b.z - end[2])).slice(0, Math.min(12, count));
+  const ordered = [...briskDestinations, ...destinations.filter(c => !briskDestinations.includes(c))];
+  const paths = ordered.slice(0, Math.min(500, count)).map(destination => {
     const path = [];
     for (let cell = destination; cell; cell = cell.parent) path.push({ x: cell.x, z: cell.z });
     path.reverse(); path.unshift({ x: entry[0], z: -room.depth / 2 - 1.1 });
@@ -37,9 +40,9 @@ export function createGuestArrival(room, items, tour, count = 60) {
     sample(time) {
       const people = [];
       paths.forEach((path, i) => {
-        const elapsed = time - GUEST_START - i * 0.16;
+        const elapsed = time - GUEST_START - i * Math.min(0.035, 7 / Math.max(1, paths.length - 1));
         if (elapsed < 0) return;
-        let distance = elapsed * (1.1 + (i % 5) * 0.06), point = path[0], rotation = 0;
+        let distance = elapsed * (i % 3 === 0 ? 4.2 + (i % 5) * 0.2 : 1.5 + (i % 5) * 0.15), point = path[0], rotation = 0;
         let walking = false;
         for (let j = 1; j < path.length; j++) {
           const next = path[j], length = Math.hypot(next.x - point.x, next.z - point.z);
