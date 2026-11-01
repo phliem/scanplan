@@ -1,0 +1,9 @@
+{
+  "slug": "scanplan",
+  "name": "Scanplan",
+  "tagline": "Explore a warehouse and arrange an event in 3D.",
+  "status": "in-progress",
+  "dev": {
+    "port": 8108
+  }
+}
