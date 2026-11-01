@@ -8,7 +8,7 @@ A browser-only 3D event-layout prototype inspired by the supplied warehouse phot
 
 Codex helped build and iterate on the 3D venue, editing controls, activity layouts, local GLB furniture library, crowd preview and cinematic tour, as well as automated geometry, model-validation and navigation tests. Three.js, OrbitControls and GLTFLoader are existing MIT-licensed dependencies; their license is included in `dist/vendor/`. The source photograph is not distributed, and venue dimensions are estimates.
 
-For the submission description, demo walkthrough, attribution notes and latest-layout branch instructions, see [SUBMISSION.md](SUBMISSION.md). The team's account of pre-existing work versus work built during the event must be confirmed before submission. This prototype does not perform automatic room scanning or free-text AI planning.
+For the submission description, demo walkthrough, attribution notes and latest-layout branch instructions, see [SUBMISSION.md](SUBMISSION.md). All Scanplan project code was built during the hackathon on 1 November 2026, as confirmed by Liem; existing third-party libraries are credited above. This prototype does not perform automatic room scanning or free-text AI planning.
 
 ## Run
 

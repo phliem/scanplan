@@ -20,7 +20,7 @@ Scanplan helps event organisers turn an empty venue into a space they can pictur
 
 **Branch containing the latest layout work:** https://github.com/phliem/Scanplan/tree/phliem/hackathon-lounge
 
-**Presenter social link:** https://github.com/phliem (confirm presenter identity)
+**Presenter social link:** https://github.com/phliem
 
 Do not use the existing sign-in-only ChatGPT Site as the required public video link. The app's **Video** control plays a live 3D animation; it does not create a recorded video file.
 
@@ -46,14 +46,14 @@ Only narrate controls and behaviour actually shown in the recording. If a step t
 
 Codex helped implement and iterate on the Three.js venue, editable dimensions, furniture interactions, activity layouts, local GLB library, animated attendees, and the cinematic arrival tour. It also helped write automated checks for room boundaries, rotated furniture collisions, generated seating, model validation, crowd placement and tour paths. The organiser directed the visual and layout choices and reviewed successive versions.
 
-Confirm the exact division of work and any other contributors before using this statement as the team's final account.
+Liem confirmed that all Scanplan project code was built during the hackathon on 1 November 2026. Existing third-party libraries are credited below.
 
 ## Existing work and attribution
 
 - Three.js 0.170.0, OrbitControls and GLTFLoader are existing MIT-licensed dependencies, vendored with their license in `dist/vendor/`.
 - The venue is inspired by a supplied photograph. Its dimensions are estimates, and its geometry is not an automatic reconstruction. The source photograph and its people are not included in deployed assets.
 - Built-in furniture geometry and textures are generated in code. User-imported GLB assets retain their own provenance and licensing; use only assets you have permission to show.
-- The standalone repository's first commit is dated 1 November 2026 at 14:10 UTC. The README says the original source is preserved in Octo Devlabs. Commit dates alone do not establish when that source was created: the team must identify any earlier prototype or assets, and clearly state what was built during the event.
+- All Scanplan project code was built during the hackathon on 1 November 2026, as confirmed by Liem. No completed Scanplan project existed before the event. The initial source was developed in Octo Devlabs and extracted into this standalone repository during the day; the standalone first commit is dated 14:10 UTC.
 - No runtime AI API is required. Codex was used during development; free-text planning and room scanning are not implemented.
 
 ## Judge quick start
@@ -71,12 +71,13 @@ Open http://localhost:8108. No API key or dependency installation is required. S
 
 Verification on 1 November: `corepack pnpm test` passed all 41 tests in the local checkout. Concurrent work is still updating the tour, so rerun verification for the final submitted revision. Seating counts are template outputs, not certified venue capacity; the crowd is an illustrative preview.
 
-## Required before submission
+## Submission readiness
 
-- Team name; each team member's name; presenter first.
-- Presenter contact email and WhatsApp number. Keep private contact details in the submission form, not this public file.
-- At least one presenter social link.
-- Accurate statement of work built today versus pre-existing work.
+- Confirmed: team Scanplan; Liem Pham presenting, George McCarthy second.
+- Presenter contact email and WhatsApp number have been supplied privately; keep them out of the public repository.
+- Presenter social link: https://github.com/phliem.
+- Confirmed by Liem: all project code was built today.
+- No public live app URL is available. A live app URL is optional in the guide; judges can run the repository locally using the instructions above.
 - Public recording of the working product, at most 90 seconds, opening without an access request.
 - Ensure the submitted README describes the submitted revision. The latest layout work is on the linked feature branch; merging requires the owner's separate instruction.
 
