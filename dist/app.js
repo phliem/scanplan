@@ -1,3 +1,4 @@
+import { createGuestArrival } from './tour-guests.js';
 import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd } from './crowd.js';
 import { crowdView } from './crowd-view.js';
 import * as THREE from 'three';
@@ -74,7 +75,7 @@ const woodTex = texture('wood');
 const wood = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.63 });
 const steel = mat('#343e3b', 0.5), truss = mat('#a0aaa1', 0.5), plaster = mat('#c1bbaa');
 const venue = new THREE.Group(); scene.add(venue);
-let leftWall, rightWall, backWall, structure, roof;
+let leftWall, rightWall, backWall, structure, roof, entranceDoors = [];
 const sharedMaterials = new Set([concrete, brick, steel, truss, plaster]);
 function buildRoom() {
   const materials = new Set();
@@ -108,9 +109,14 @@ function buildRoom() {
   const doorW = Math.min(3.2, w * 0.3), doorH = Math.min(3.5, h * 0.7), pierW = (w - doorW) / 2;
   for (const side of [-1, 1]) box(backWall, pierW, h, 0.25, side * (doorW / 2 + pierW / 2), h / 2, back, brick);
   box(backWall, doorW, h - doorH, 0.25, 0, (h + doorH) / 2, back, brick);
-  box(backWall, doorW - 0.1, doorH, 0.1, 0, doorH / 2, back - 0.1, mat('#35443d'));
+  entranceDoors = [];
+  for (const side of [-1, 1]) {
+    const hinge = new THREE.Group(); hinge.position.set(side * doorW / 2, 0, back - 0.15); backWall.add(hinge);
+    box(hinge, doorW / 2 - 0.04, doorH, 0.1, -side * doorW / 4, doorH / 2, 0, mat('#35443d'));
+    box(hinge, 0.06, 0.35, 0.12, -side * (doorW / 2 - 0.15), 1.1, 0.1, truss);
+    entranceDoors.push({ hinge, side });
+  }
   box(backWall, doorW + 0.3, 0.4, 0.35, 0, doorH + 0.1, back + 0.2, steel);
-  box(backWall, 0.035, doorH, 0.1, 0, doorH / 2, back, truss);
   structure = new THREE.Group(); venue.add(structure);
   const frames = Math.max(2, Math.round(d / 4.3));
   for (let i = 0; i <= frames; i++) {
@@ -278,8 +284,12 @@ function exportedModels() {
   });
 }
 $('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, eventPlan, crowd: crowdConfig, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
-const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '' };
-function tourPlan() { return createTour(ROOM, items, camera.aspect); }
+const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '', guests: null };
+function tourPlan() {
+  const plan = createTour(ROOM, items, camera.aspect);
+  tourState.guests = createGuestArrival(ROOM, items, plan, 150);
+  return plan;
+}
 function setPlaying(playing) {
   tourState.playing = playing; tourState.lastFrame = null;
   $('tour-play').textContent = playing ? 'Ⅱ' : '▶';
@@ -288,6 +298,10 @@ function setPlaying(playing) {
 function paintTour() {
   if (!tourState.plan) return;
   const shot = tourState.plan.sample(tourState.time);
+  for (const { hinge, side } of entranceDoors) hinge.rotation.y = side * shot.doorOpen * Math.PI * 0.53;
+  const arrivals = tourState.guests.sample(tourState.time);
+  // Keep the lens clear while guests follow the same aisles as the camera.
+  paintPeople({ people: arrivals.people.filter(p => Math.hypot(p.x - shot.position[0], p.z - shot.position[2]) > 1) });
   camera.position.fromArray(shot.position); camera.up.fromArray(shot.up); camera.lookAt(new THREE.Vector3(...shot.target));
   camera.fov = shot.fov; camera.updateProjectionMatrix();
   controls.target.fromArray(shot.target);
@@ -315,7 +329,9 @@ function startTour() {
   paintTour();
 }
 function stopTour() {
-  setPlaying(false); tourState.plan = null;
+  setPlaying(false); tourState.plan = null; tourState.guests = null;
+  for (const { hinge } of entranceDoors) hinge.rotation.y = 0;
+  paintPeople(crowd);
   roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = false; mesh.material.opacity = 1; mesh.material.depthWrite = true; } });
   camera.up.set(0, 1, 0); camera.fov = 43; camera.updateProjectionMatrix();
   $('viewport').classList.remove('tour-interior'); controls.enabled = true;
@@ -511,10 +527,10 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = crowdFrame === null || !Number.isFinite(now) ? 0 : (now - crowdFrame) / 1000;
   crowdFrame = Number.isFinite(now) ? now : null;
-  if (!crowdConfig.paused && !document.hidden && crowd.people.length) { advanceCrowd(crowd, dt); paintPeople(crowd); }
+  if (view !== 'video' && !crowdConfig.paused && !document.hidden && crowd.people.length) { advanceCrowd(crowd, dt); paintPeople(crowd); }
   if (view === 'video') {
     if (tourState.playing && !document.hidden && Number.isFinite(now)) {
-      if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + Math.min(0.1, (now - tourState.lastFrame) / 1000));
+      if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + 2 * Math.min(0.1, (now - tourState.lastFrame) / 1000));
       tourState.lastFrame = now;
       if (tourState.time >= TOUR_DURATION) setPlaying(false);
     }

@@ -4,10 +4,10 @@ export const WALK_START = 9;
 export const WALK_END = 22;
 export const ENTRY_START = 7;
 export const CHAPTERS = [
-  { start: 0, title: 'The floor plan', subtitle: 'Every gathering starts with a little perspective.' },
-  { start: 2, title: 'From plan to place', subtitle: 'Brick walls. Steel trusses. Room for possibilities.' },
+  { start: 0, title: 'You’re first to arrive', subtitle: 'Fly down towards the warehouse entrance.' },
+  { start: 2, title: 'The doors are opening', subtitle: 'Follow the flight through the double doors.' },
   { start: ENTRY_START, title: 'Step inside', subtitle: 'A view from 1.65 metres above the floor.' },
-  { start: WALK_END, title: 'Take it all in', subtitle: 'Imagine the conversations that could happen here.' },
+  { start: WALK_END, title: 'Take it all in', subtitle: 'Your guests follow you in and find their place.' },
 ];
 const mix = (a, b, t) => a + (b - a) * t;
 const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
@@ -24,25 +24,27 @@ export function walkable(x, z, room, items, clearance = 0.42) {
 export function walkingRoute(room, items) {
   const step = 0.4, nx = Math.floor((room.width - 1.2) / step) + 1, nz = Math.floor((room.depth - 1.2) / step) + 1;
   const cells = [], index = (x, z) => z * nx + x;
-  for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) cells.push({ x: -room.width / 2 + 0.6 + x * step, z: -room.depth / 2 + 0.6 + z * step });
-  const free = cells.map(p => walkable(p.x, p.z, room, items, 0.55));
+  for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) cells.push({ x: -room.width / 2 + 0.6 + x * step, z: -room.depth / 2 + 0.45 + z * step });
+  const free = cells.map(p => walkable(p.x, p.z, room, items, 0.45));
   const closest = (x, z, candidates) => candidates.reduce((best, i) => Math.hypot(cells[i].x - x, cells[i].z - z) < Math.hypot(cells[best].x - x, cells[best].z - z) ? i : best, candidates[0]);
   const available = free.flatMap((ok, i) => ok ? [i] : []);
   if (!available.length) return [];
-  const front = room.depth / 2 - 0.6;
-  // Require an entry point near the open front instead of teleporting past a barrier.
-  const entrances = available.filter(i => cells[i].z >= front - 0.5);
+  const front = -room.depth / 2 + 0.45;
+  // Require an entry point at the double doors instead of teleporting past a barrier.
+  const entrances = available.filter(i => cells[i].z <= front + 0.05
+    && Math.abs(cells[i].x) < Math.min(3.2, room.width * 0.3) / 2 - 0.42
+    && [0.1, 0.2, 0.3, 0.4, 0.5].every(d => walkable(cells[i].x, -room.depth / 2 + d, room, items, Math.min(d, 0.42))));
   if (!entrances.length) return [];
   const start = closest(0, front, entrances), queue = [start], parent = new Map([[start, null]]);
   for (let cursor = 0; cursor < queue.length; cursor++) {
     const id = queue[cursor], x = id % nx, z = Math.floor(id / nx);
     for (const [dx, dz] of [[0, -1], [-1, 0], [1, 0], [0, 1]]) {
       const xx = x + dx, zz = z + dz, next = index(xx, zz);
-      if (xx < 0 || xx >= nx || zz < 0 || zz >= nz || !free[next] || parent.has(next)) continue;
+      if (xx < 0 || xx >= nx || zz < 0 || zz >= nz || !free[next] || parent.has(next) || ![0.25, 0.5, 0.75].every(t => walkable(cells[id].x + dx * step * t, cells[id].z + dz * step * t, room, items, 0.45))) continue;
       parent.set(next, id); queue.push(next);
     }
   }
-  const end = closest(0, -room.depth * 0.3, queue), route = [];
+  const end = closest(0, room.depth * 0.3, queue), route = [];
   for (let i = end; i !== null; i = parent.get(i)) route.push([cells[i].x, 1.65, cells[i].z]);
   return route.reverse();
 }
@@ -53,12 +55,11 @@ function along(points, progress) {
 }
 export function createTour(room, items, aspect = 1) {
   const route = walkingRoute(room, items), inside = route.length > 0;
-  const entry = inside ? route[0] : [0, 2.3, room.depth / 2 + 1.8];
+  const entry = inside ? route[0] : [0, 1.65, -room.depth / 2 - 1.8];
   const last = inside ? route.at(-1) : entry;
-  const floorHeight = Math.max(room.depth, room.width / aspect) * 1.6;
-  const overview = [room.width * 0.7, Math.max(room.ridge + 4, room.depth * 0.7), room.depth * 0.9];
-  const threshold = [entry[0], 2.1, room.depth / 2 + 2.5];
-  const forward = [entry[0], 1.65, -room.depth / 3];
+  const exterior = [0, Math.min(room.eaves + 1, 7), -room.depth / 2 - 10];
+  const threshold = [entry[0], 1.65, -room.depth / 2 - 2.5];
+  const forward = [entry[0], 1.65, room.depth / 3];
   function walk(t) {
     // Round grid corners within the extra clearance reserved by the route planner.
     const rounded = blend(along(route, Math.max(0, t - 0.008)), along(route, Math.min(1, t + 0.008)), 0.5);
@@ -69,26 +70,23 @@ export function createTour(room, items, aspect = 1) {
   function sampleRaw(seconds) {
       const t = Math.max(0, Math.min(TOUR_DURATION, seconds));
       let position, target, fov = 43;
-      if (t < 2) {
-        position = [0, floorHeight * mix(1.04, 1, smooth(t / 2)), 0.01]; target = [0, 0, 0];
-      } else if (t < 4) {
-        const p = smooth((t - 2) / 2); position = blend([0, floorHeight, 0.01], overview, p); target = blend([0, 0, 0], [0, room.eaves / 2, 0], p);
-      } else if (t < ENTRY_START) {
-        const p = smooth((t - 4) / 3); position = blend(overview, threshold, p); target = blend([0, room.eaves / 2, 0], forward, p); fov = mix(43, 62, p);
+      if (t < ENTRY_START) {
+        const p = smooth(t / ENTRY_START);
+        position = blend(exterior, threshold, p); target = forward; fov = mix(48, 62, p);
       } else if (t < WALK_START) {
         const p = smooth((t - ENTRY_START) / 2); position = blend(threshold, entry, p); target = forward; fov = 62;
       } else if (t < WALK_END && inside && route.length > 1) {
         const p = smooth((t - WALK_START) / (WALK_END - WALK_START)); position = walk(p); fov = 62;
         const ahead = walk(Math.min(1, p + 0.08));
-        target = [ahead[0], 1.65, Math.min(position[2] - 0.7, ahead[2])];
+        target = blend(forward, [ahead[0], 1.65, Math.max(position[2] + 0.7, ahead[2])], smooth((t - WALK_START) / 2));
       } else {
         position = last; fov = 62;
         // Pan across the roof structure and turn gently back towards the gathering space.
-        const p = smooth((t - WALK_END) / (TOUR_DURATION - WALK_END)), angle = p * Math.PI * 0.72;
-        target = [last[0] + Math.sin(angle) * room.width * 0.35, mix(1.65, room.eaves * 0.65, Math.sin(p * Math.PI)), last[2] - Math.cos(angle) * room.depth * 0.25];
+        const p = smooth((t - WALK_END) / (TOUR_DURATION - WALK_END)), angle = p * Math.PI;
+        target = [last[0] + Math.sin(angle) * room.width * 0.35, mix(1.65, room.eaves * 0.65, Math.sin(p * Math.PI)), last[2] + Math.cos(angle) * room.depth * 0.25];
       }
       const chapter = [...CHAPTERS].reverse().find(c => t >= c.start);
-      return { position, target, fov, roofOpacity: smooth((t - 4) / 4), structureVisible: t >= 2, chapter };
+      return { position, target, fov, roofOpacity: 1, structureVisible: true, doorOpen: smooth((t - 2) / 4), chapter };
   }
   return {
     route, inside,
@@ -109,7 +107,7 @@ export function createTour(room, items, aspect = 1) {
       }
       for (let axis = 0; axis < 3; axis++) position[axis] /= weightSum;
       const length = Math.hypot(...direction) || 1;
-      return { ...sampleRaw(t), up: blend([0, 0, -1], [0, 1, 0], smooth((t - 1) / 5)), position, target: position.map((v, axis) => v + direction[axis] / length * 10), fov: fov / weightSum, roofOpacity: roofOpacity / weightSum };
+      return { ...sampleRaw(t), up: [0, 1, 0], position, target: position.map((v, axis) => v + direction[axis] / length * 10), fov: fov / weightSum, roofOpacity: roofOpacity / weightSum };
     },
   };
 }
