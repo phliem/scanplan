@@ -33,3 +33,25 @@ test('collision axes match Three.js rotations beyond 45 degree steps', () => {
   assert.equal(overlaps(a, { ...a, z: 1.1 }), false);
   assert.equal(overlaps(a, { ...a, z: 0.5 }), true);
 });
+
+test('activity layouts seat requested guests within bounds without overlaps', async () => {
+  const { activityLayout } = await import('./dist/layout.js');
+  for (const activity of ['hackathon', 'theatre']) for (const requested of [1, 3, 4, 5, 80, 100, 112, 180, 1000]) {
+    const plan = activityLayout(activity, requested);
+    assert.ok(validLayout(plan.items));
+    assert.equal(plan.seated, Math.min(requested, plan.capacity));
+    assert.equal(plan.shortfall, requested - plan.seated);
+    assert.equal(plan.items.filter(i => i.type === 'chair').length, plan.seated);
+    assert.equal(plan.items.filter(i => i.type === 'stage').length, activity === 'theatre' ? 1 : 0);
+    for (let a = 0; a < plan.items.length; a++) {
+      assert.deepEqual(constrain(plan.items[a]), plan.items[a]);
+      for (let b = a + 1; b < plan.items.length; b++) assert.equal(overlaps(plan.items[a], plan.items[b]), false, `${activity} ${requested}: overlap ${a} ${b}`);
+    }
+    assert.deepEqual(activityLayout(activity, requested), plan);
+  }
+});
+test('activity layouts reject invalid requests', async () => {
+  const { activityLayout } = await import('./dist/layout.js');
+  for (const requested of [0, -1, NaN, Infinity, 1.5, '100', 1001]) assert.throws(() => activityLayout('hackathon', requested), RangeError);
+  for (const activity of ['wedding', '__proto__', null]) assert.throws(() => activityLayout(activity, 100), RangeError);
+});

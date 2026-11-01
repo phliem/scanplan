@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { ROOM, CATALOG, constrain, overlaps, validLayout, initialLayout } from './layout.js';
+import { ROOM, CATALOG, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 let renderer;
@@ -110,16 +110,20 @@ for (const side of [-1, 1]) for (const z of [-8.25, -2.75, 2.75, 8.25]) {
   sheet.rotation.z = -side * Math.atan(1 / 3);
 }
 const furniture = new THREE.Group(); scene.add(furniture);
+let eventPlan = null;
 let items = [], selected = null, nextId = 1, undoStack = [], redoStack = [], view = 'orbit';
 
 function status(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(status.timer); status.timer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
-function save() { try { localStorage.setItem('warehouse-layout-v1', JSON.stringify(items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })))); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
-function snapshot() { return structuredClone(items); }
+function save() { try { localStorage.setItem('warehouse-layout-v2', JSON.stringify({ furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })), eventPlan })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
+function snapshot() { return structuredClone({ items, eventPlan }); }
 function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack = []; }
 function meshFor(item) {
   const g = new THREE.Group(); g.userData.id = item.id;
   const d = CATALOG[item.type], fabric = mat(d.color), legs = steel;
-  if (item.type === 'table') {
+  if (item.type === 'stage') {
+    box(g, d.width, d.height, d.depth, 0, d.height / 2, 0, fabric);
+    box(g, d.width, 0.04, d.depth, 0, d.height, 0, wood);
+  } else if (item.type === 'table') {
     box(g, d.width, 0.08, d.depth, 0, 0.75, 0, wood);
     for (const x of [-0.84, 0.84]) for (const z of [-0.31, 0.31]) box(g, 0.055, 0.7, 0.055, x, 0.37, z, legs);
     box(g, 1.7, 0.04, 0.04, 0, 0.2, 0, legs);
@@ -151,33 +155,34 @@ function updateInspector() {
     $('collision').textContent = collision ? 'Overlaps another object. Move it to make space.' : `${(item.rotation * 180 / Math.PI % 360 + 360) % 360}° rotation · dimensions in metres`;
   }
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
+  $('layout-name').textContent = eventPlan ? `${ACTIVITIES[eventPlan.activity].name} · ${eventPlan.seated} seats for ${eventPlan.requested} people` : 'Your custom layout';
   $('object-count').textContent = `${items.length} objects`;
-  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs`;
+  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs · ${items.filter(i => i.type === 'stage').length} stages`;
 }
 function renderItems() {
   // Geometry/materials belong to individual furniture; shared wood and steel stay alive.
   for (const child of [...furniture.children]) { child.traverse(m => { if (m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
   for (const item of items) furniture.add(meshFor(item)); updateInspector(); save();
 }
-function setItems(data) { items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
+function setItems(data, plan = null) { eventPlan = plan; items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
 function findSpot(type, preferred, rotation = 0) {
   const candidates = preferred ? [preferred] : [];
   for (let z = 0; z <= 9; z += 1.5) for (let x = -4.5; x <= 4.5; x += 1.5) for (const sign of z ? [1, -1] : [1]) candidates.push({ x, z: z * sign });
   return candidates.map(p => constrain({ type, ...p, rotation })).find(p => items.every(i => !overlaps(p, i)));
 }
-function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
-function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; checkpoint(); items[i] = constrain(fn({ ...items[i] })); renderItems(); }
-function remove() { if (selected === null) return; checkpoint(); items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
-function history(from, to) { if (!from.length) return; to.push(snapshot()); items = from.pop(); selected = null; renderItems(); }
+function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); eventPlan = null; item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
+function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; checkpoint(); eventPlan = null; items[i] = constrain(fn({ ...items[i] })); renderItems(); }
+function remove() { if (selected === null) return; checkpoint(); eventPlan = null; items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
+function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); items = previous.items; eventPlan = previous.eventPlan; selected = null; renderItems(); }
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
 $('rotate').onclick = () => changeSelected(i => ({ ...i, rotation: (i.rotation + Math.PI / 4) % (Math.PI * 2) }));
 $('delete').onclick = remove;
-$('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
+$('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); eventPlan = null; const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
 for (const axis of ['x', 'z']) $('pos-' + axis).onchange = e => { const value = e.target.valueAsNumber; if (Number.isFinite(value)) changeSelected(i => ({ ...i, [axis]: value })); else updateInspector(); };
 $('undo').onclick = () => history(undoStack, redoStack); $('redo').onclick = () => history(redoStack, undoStack);
 $('reset').onclick = () => { checkpoint(); setItems(initialLayout()); status('Original layout restored. Undo to recover your changes.'); };
 $('roof').onchange = e => roof.visible = e.target.checked;
-$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 1, units: 'metres', approximate: true, room: ROOM, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 2, eventPlan, units: 'metres', approximate: true, room: ROOM, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
 function setView(name) {
   view = name;
   for (const key of ['orbit', 'top', 'inside']) $('view-' + key).classList.toggle('active', name === key);
@@ -212,7 +217,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   if (!drag) { renderer.domElement.style.cursor = hit() !== null ? 'grab' : 'default'; return; }
   if (!p) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) < 4) return;
-  if (!drag.moved) { checkpoint(); drag.moved = true; }
+  if (!drag.moved) { checkpoint(); eventPlan = null; drag.moved = true; }
   let x = p.x + drag.offset.x, z = p.z + drag.offset.z;
   if ($('snap').checked) { x = Math.round(x * 4) / 4; z = Math.round(z * 4) / 4; }
   const i = items.findIndex(i => i.id === drag.id); items[i] = constrain({ ...items[i], x, z });
@@ -222,15 +227,66 @@ renderer.domElement.addEventListener('pointermove', e => {
 function endDrag() { if (!drag) return; drag = null; controls.enabled = true; save(); renderer.domElement.style.cursor = 'grab'; }
 renderer.domElement.addEventListener('pointerup', endDrag); renderer.domElement.addEventListener('pointercancel', endDrag); renderer.domElement.addEventListener('lostpointercapture', endDrag);
 window.addEventListener('keydown', e => {
-  if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? history(redoStack, undoStack) : history(undoStack, redoStack); }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); remove(); }
   if (e.key.toLowerCase() === 'r') $('rotate').click();
   if (e.key === 'Escape') { selected = null; updateInspector(); }
 });
+function previewActivity() {
+  const activity = $('activity').value;
+  $('activity-description').textContent = ACTIVITIES[activity].description;
+  try {
+    const plan = activityLayout(activity, $('attendees').valueAsNumber);
+    $('activity-preview').textContent = `${plan.seated} / ${plan.requested} people seated · ${plan.capacity} seats in this template.` + (plan.shortfall ? ` Short by ${plan.shortfall} seats. Try fewer people or another activity.` : ' Fits this illustrative arrangement.');
+    $('activity-preview').dataset.shortfall = String(plan.shortfall > 0);
+    $('apply-activity').disabled = false;
+    return plan;
+  } catch (error) {
+    $('activity-preview').textContent = error.message;
+    $('apply-activity').disabled = true;
+    return null;
+  }
+}
+$('activity').onchange = previewActivity;
+$('attendees').oninput = previewActivity;
+$('activity-form').onsubmit = e => {
+  e.preventDefault();
+  const plan = previewActivity();
+  if (!plan) return;
+  checkpoint();
+  const { items: arranged, ...summary } = plan;
+  setItems(arranged, summary);
+  setView('top');
+  status(`${ACTIVITIES[plan.activity].name} layout applied. Undo to recover your changes.`);
+};
 let restored = false;
-try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); if (validLayout(data)) { setItems(data); restored = true; } } } catch { }
+try {
+  const raw = localStorage.getItem('warehouse-layout-v2');
+  if (raw) {
+    const data = JSON.parse(raw);
+    if (validLayout(data.furniture)) {
+      let plan = null;
+      if (data.eventPlan) {
+        try {
+          const expected = activityLayout(data.eventPlan.activity, data.eventPlan.requested);
+          // Only retain a capacity claim for exactly the generated furniture.
+          if (JSON.stringify(expected.items) === JSON.stringify(data.furniture)) {
+            const { items: arranged, ...summary } = expected;
+            plan = summary;
+          }
+        } catch { /* Invalid activity metadata must not discard valid furniture. */ }
+      }
+      setItems(data.furniture, plan); restored = true;
+      if (plan) { $('activity').value = plan.activity; $('attendees').value = plan.requested; }
+    }
+  }
+} catch { }
+if (!restored) {
+  try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); if (validLayout(data)) { setItems(data); restored = true; } } } catch { }
+}
 if (!restored) setItems(initialLayout());
+previewActivity();
 setView('orbit'); $('loading').remove();
 new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); }).observe(viewport);
 function frame() {
