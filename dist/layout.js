@@ -60,7 +60,7 @@ export function initialLayout() {
 }
 
 export const ACTIVITIES = {
-  hackathon: { name: 'Hackathon', description: 'Five table groups for 150 people, two lounge groups with four couches each, plus coffee, tea and snacks.' },
+  hackathon: { name: 'Hackathon', description: 'Five table groups and two couch groups for 150 people. Larger rooms follow the photo: side worktables, central lounges and refreshments against the right wall.' },
   theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
 };
 
@@ -76,11 +76,16 @@ export function activityLayout(activity, requested, room = ROOM) {
   if (activity === 'hackathon') {
     const lounge = room.width >= 11 && room.depth >= 18;
     const grouped = room.width >= 11 && room.depth >= 22;
+    const photoLayout = room.width >= 14 && room.depth >= 28;
     const seatsPerTable = 6;
     if (lounge) {
       COUCH_TYPES.forEach((type, i) => {
         const side = i < 4 ? -1 : 1;
-        if (grouped) {
+        if (photoLayout) {
+          const row = Math.floor(i % 4 / 2);
+          const centreZ = room.depth * (i < 4 ? -0.23 : 0.13);
+          add(type, i % 2 ? 1.15 : -1.15, centreZ + (row ? 1.1 : -1.1), row ? Math.PI : 0);
+        } else if (grouped) {
           // Two facing pairs in each of two separate four-couch lounges.
           const row = Math.floor(i % 4 / 2);
           add(type, side * room.width / 4 + (i % 2 ? 1.15 : -1.15), room.depth / 2 - (row ? 1.4 : 3.6), row ? Math.PI : 0);
@@ -97,7 +102,22 @@ export function activityLayout(activity, requested, room = ROOM) {
     const outerX = room.width / 2 - (lounge ? 2.4 : 1.15);
     const columnCount = Math.max(1, Math.floor(outerX * 2 / 3.1) + 1);
     for (let col = 0; col < columnCount; col++) columns.push(columnCount === 1 ? 0 : -outerX + col * 2 * outerX / (columnCount - 1));
-    if (grouped) {
+    if (photoLayout) {
+      // Photo-inspired plan: two long worktable banks on each side, a fifth
+      // bank across the foreground, and two central conversation areas.
+      const sideX = room.width / 2 - 3;
+      const foregroundZ = room.depth / 2 - 2.1;
+      const groups = [
+        { x: -sideX, z: firstZ + 4, rotation: Math.PI / 2 },
+        { x: sideX, z: firstZ + 4, rotation: Math.PI / 2 },
+        { x: -sideX, z: foregroundZ - 8.2, rotation: Math.PI / 2 },
+        { x: sideX, z: foregroundZ - 8.2, rotation: Math.PI / 2 },
+        { x: 0, z: foregroundZ, rotation: 0 },
+      ];
+      for (const offset of [0, -2, 2, -4, 4]) for (const group of groups)
+        slots.push({ x: group.x + Math.cos(group.rotation) * offset, z: group.z - Math.sin(group.rotation) * offset, rotation: group.rotation });
+      ['coffee', 'tea', 'snacks'].forEach((type, i) => add(type, room.width / 2 - 0.65, -room.depth * 0.28 + i * 2.5, -Math.PI / 2));
+    } else if (grouped) {
       // Five joined worktables per group, six chairs per table: 30 people.
       // Assign one table to each group in turn so smaller requests stay spread.
       for (const x of [0, -2, 2, -4, 4]) for (let group = 0; group < 5; group++)
@@ -125,11 +145,11 @@ export function activityLayout(activity, requested, room = ROOM) {
     // from the entrance and leaving the far half empty.
     for (let i = 0; i < tableCount; i++) {
       const index = grouped ? i : tableCount === 1 ? Math.floor((slots.length - 1) / 2) : Math.round(i * (slots.length - 1) / (tableCount - 1));
-      const { x, z } = slots[index];
-      add('table', x, z);
+      const { x, z, rotation = 0 } = slots[index];
+      add('table', x, z, rotation);
       for (const dz of [-0.85, 0.85]) for (const dx of [-0.67, 0, 0.67]) {
         if (!remaining) break;
-        add('chair', x + dx, z + dz, dz < 0 ? 0 : Math.PI);
+        add('chair', x + Math.cos(rotation) * dx + Math.sin(rotation) * dz, z - Math.sin(rotation) * dx + Math.cos(rotation) * dz, rotation + (dz < 0 ? 0 : Math.PI));
         remaining--;
       }
     }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from './dist/vendor/three.module.js';
-import { activityLayout, DEFAULT_ROOM, CATALOG, COUCH_TYPES, isCouch } from './dist/layout.js';
+import { activityLayout, DEFAULT_ROOM, CATALOG, COUCH_TYPES, isCouch, constrain, overlaps } from './dist/layout.js';
 import { createTour } from './dist/tour.js';
 import { createCrowd } from './dist/crowd.js';
 import { couchModel, refreshmentModel } from './dist/furniture-models.js';
@@ -61,5 +61,35 @@ test('smaller hackathons distribute desks between up to five groups', () => {
     const desks = plan.items.filter(i => i.type === 'table');
     assert.equal(new Set(desks.map(i => i.z)).size, Math.min(5, desks.length));
     assert.equal(plan.items.filter(i => i.type === 'chair').length, requested);
+  }
+});
+
+// Identify spatially connected banks instead of relying on generation order.
+function groupSizes(items, distance) {
+  const pending = new Set(items), sizes = [];
+  while (pending.size) {
+    const queue = [pending.values().next().value]; pending.delete(queue[0]);
+    for (let i = 0; i < queue.length; i++) for (const other of pending)
+      if (Math.hypot(other.x - queue[i].x, other.z - queue[i].z) < distance) { queue.push(other); pending.delete(other); }
+    sizes.push(queue.length);
+  }
+  return sizes.sort((a, b) => a - b);
+}
+
+test('photo-inspired rooms retain five desk groups, two central lounges and right-wall refreshments without overlaps', () => {
+  for (const [width, depth] of [[14, 28], [16, 28], [20, 36]]) {
+    const room = { ...DEFAULT_ROOM, width, depth }, plan = activityLayout('hackathon', 150, room);
+    const desks = plan.items.filter(i => i.type === 'table');
+    assert.deepEqual(groupSizes(desks, 2.05), [5, 5, 5, 5, 5]);
+    assert.equal(desks.filter(i => i.x < -2.5).length, 10 + 1);
+    assert.equal(desks.filter(i => i.x > 2.5).length, 10 + 1);
+    const couches = plan.items.filter(i => isCouch(i.type));
+    assert.deepEqual(groupSizes(couches, 2.35), [4, 4]);
+    assert.ok(couches.every(i => Math.abs(i.x) < 2));
+    assert.ok(plan.items.filter(i => CATALOG[i.type].kind === 'refreshment').every(i => i.x > width / 2 - 1));
+    for (let a = 0; a < plan.items.length; a++) {
+      assert.deepEqual(constrain(plan.items[a], room), plan.items[a]);
+      for (let b = a + 1; b < plan.items.length; b++) assert.equal(overlaps(plan.items[a], plan.items[b]), false);
+    }
   }
 });
