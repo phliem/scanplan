@@ -1,4 +1,10 @@
-export const ROOM = { width: 12, depth: 22, eaves: 5.2, ridge: 7.2 };
+export const DEFAULT_ROOM = Object.freeze({ width: 12, depth: 22, eaves: 5.2, ridge: 7.2 });
+export const ROOM = { ...DEFAULT_ROOM };
+export function validRoom(room) {
+  return !!room && ['width', 'depth', 'eaves', 'ridge'].every(k => typeof room[k] === 'number' && Number.isFinite(room[k]))
+    && room.width >= 6 && room.width <= 60 && room.depth >= 6 && room.depth <= 60
+    && room.eaves >= 3 && room.eaves <= 15 && room.ridge >= room.eaves + 0.5 && room.ridge <= 20;
+}
 export const CATALOG = {
   couch: { name: 'Couch', width: 2.3, depth: 0.95, height: 0.95, color: '#9b4541' },
   table: { name: 'Work table', width: 2.0, depth: 0.9, height: 0.75, color: '#bd8a4b' },
@@ -8,9 +14,9 @@ export function bounds(item) {
   const d = CATALOG[item.type], c = Math.abs(Math.cos(item.rotation)), s = Math.abs(Math.sin(item.rotation));
   return { x: (d.width * c + d.depth * s) / 2, z: (d.width * s + d.depth * c) / 2 };
 }
-export function constrain(item) {
+export function constrain(item, room = ROOM) {
   const b = bounds(item);
-  return { ...item, x: Math.max(-ROOM.width / 2 + b.x + 0.15, Math.min(ROOM.width / 2 - b.x - 0.15, item.x)), z: Math.max(-ROOM.depth / 2 + b.z + 0.15, Math.min(ROOM.depth / 2 - b.z - 0.15, item.z)) };
+  return { ...item, x: Math.max(-room.width / 2 + b.x + 0.15, Math.min(room.width / 2 - b.x - 0.15, item.x)), z: Math.max(-room.depth / 2 + b.z + 0.15, Math.min(room.depth / 2 - b.z - 0.15, item.z)) };
 }
 export function overlaps(a, b) {
   // Separating-axis test for rotated rectangular furniture footprints.

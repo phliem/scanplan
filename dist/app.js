@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { ROOM, CATALOG, constrain, overlaps, validLayout, initialLayout } from './layout.js';
+import { ROOM, DEFAULT_ROOM, CATALOG, constrain, overlaps, validLayout, validRoom, initialLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 let renderer;
@@ -66,55 +66,91 @@ const concrete = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0
 const woodTex = texture('wood');
 const wood = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.63 });
 const steel = mat('#343e3b', 0.5), truss = mat('#a0aaa1', 0.5), plaster = mat('#c1bbaa');
-const base = new THREE.Group(); scene.add(base);
-box(base, 12.5, 0.3, 22.5, 0, -0.2, 0, mat('#a3aa9a'));
-box(base, 12, 0.12, 22, 0, -0.02, 0, concrete);
-const grid = new THREE.GridHelper(22, 44, '#7e8c73', '#9da98e'); grid.position.y = 0.045; grid.material.transparent = true; grid.material.opacity = 0.12; scene.add(grid);
-const leftWall = new THREE.Group(), rightWall = new THREE.Group(), backWall = new THREE.Group();
-scene.add(leftWall, rightWall, backWall);
-function sideWall(group, x) {
-  box(group, 0.24, 1.1, 22, x, 0.55, 0, plaster);
-  box(group, 0.24, 1.7, 22, x, 4.35, 0, brick);
-  for (let z = -10; z < 11; z += 3.6) {
-    box(group, 0.25, 2.4, 0.9, x, 2.3, z, plaster);
-    const wx = x + (x < 0 ? 0.14 : -0.14);
-    box(group, 0.06, 2.2, 2.55, wx, 2.28, z + 1.75, mat('#c4d8d0', 0.25));
-    for (const zz of [z + 0.48, z + 1.75, z + 3.02]) box(group, 0.1, 2.25, 0.055, wx + (x < 0 ? 0.04 : -0.04), 2.28, zz, steel);
-    box(group, 0.12, 0.07, 2.6, wx, 2.25, z + 1.75, steel);
+const venue = new THREE.Group(); scene.add(venue);
+let leftWall, rightWall, backWall, structure, roof;
+const sharedMaterials = new Set([concrete, brick, steel, truss, plaster]);
+function buildRoom() {
+  const materials = new Set();
+  venue.traverse(mesh => { if (mesh.isMesh || mesh.isLineSegments) { mesh.geometry.dispose(); if (!sharedMaterials.has(mesh.material)) materials.add(mesh.material); } });
+  for (const material of materials) material.dispose();
+  venue.clear();
+  const { width: w, depth: d, eaves: h, ridge: peak } = ROOM;
+  const half = w / 2, back = -d / 2, rise = peak - h;
+  concreteTex.repeat.set(w / 3, d / 3);
+  const base = new THREE.Group(); venue.add(base);
+  box(base, w + 0.5, 0.3, d + 0.5, 0, -0.2, 0, mat('#a3aa9a'));
+  box(base, w, 0.12, d, 0, -0.02, 0, concrete);
+  const gridSize = Math.max(w, d), grid = new THREE.GridHelper(gridSize, Math.ceil(gridSize * 2), '#7e8c73', '#9da98e');
+  grid.position.y = 0.045; grid.material.transparent = true; grid.material.opacity = 0.12; venue.add(grid);
+  leftWall = new THREE.Group(); rightWall = new THREE.Group(); backWall = new THREE.Group();
+  venue.add(leftWall, rightWall, backWall);
+  function sideWall(group, x) {
+    const sill = Math.min(1.1, h * 0.22), windowTop = h * 0.67;
+    box(group, 0.24, sill, d, x, sill / 2, 0, plaster);
+    box(group, 0.24, h - windowTop, d, x, (h + windowTop) / 2, 0, brick);
+    const count = Math.max(2, Math.round(d / 3.6)), bay = d / count, pier = Math.min(0.9, bay * 0.25);
+    for (let i = 0; i <= count; i++) box(group, 0.25, windowTop - sill, pier, x, (windowTop + sill) / 2, back + i * bay, plaster);
+    for (let i = 0; i < count; i++) {
+      const z = back + (i + 0.5) * bay, wx = x + (x < 0 ? 0.14 : -0.14), span = bay - pier;
+      box(group, 0.06, windowTop - sill, span, wx, (windowTop + sill) / 2, z, mat('#c4d8d0', 0.25));
+      for (const zz of [z - span / 2, z, z + span / 2]) box(group, 0.1, windowTop - sill, 0.055, wx + (x < 0 ? 0.04 : -0.04), (windowTop + sill) / 2, zz, steel);
+      box(group, 0.12, 0.07, span, wx, (windowTop + sill) / 2, z, steel);
+    }
   }
-}
-sideWall(leftWall, -6); sideWall(rightWall, 6);
-// Rear opening and brick piers, inspired by the venue photograph.
-box(backWall, 4.4, 5.2, 0.25, -3.8, 2.6, -11, brick);
-box(backWall, 4.4, 5.2, 0.25, 3.8, 2.6, -11, brick);
-box(backWall, 3.2, 1.7, 0.25, 0, 4.35, -11, brick);
-box(backWall, 3.1, 3.5, 0.1, 0, 1.75, -11.1, mat('#35443d'));
-box(backWall, 3.5, 0.6, 0.35, 0, 3.55, -10.8, steel);
-box(backWall, 0.035, 3.1, 0.1, 0, 1.55, -11, truss);
-const structure = new THREE.Group(); scene.add(structure);
-for (const z of [-10.8, -6.5, -2.2, 2.2, 6.5, 10.8]) {
-  for (const x of [-5.88, 5.88]) {
-    box(structure, 0.18, 5.2, 0.22, x, 2.6, z, steel);
-    box(structure, 0.42, 0.1, 0.42, x, 0.1, z, steel);
+  sideWall(leftWall, -half); sideWall(rightWall, half);
+  const doorW = Math.min(3.2, w * 0.3), doorH = Math.min(3.5, h * 0.7), pierW = (w - doorW) / 2;
+  for (const side of [-1, 1]) box(backWall, pierW, h, 0.25, side * (doorW / 2 + pierW / 2), h / 2, back, brick);
+  box(backWall, doorW, h - doorH, 0.25, 0, (h + doorH) / 2, back, brick);
+  box(backWall, doorW - 0.1, doorH, 0.1, 0, doorH / 2, back - 0.1, mat('#35443d'));
+  box(backWall, doorW + 0.3, 0.4, 0.35, 0, doorH + 0.1, back + 0.2, steel);
+  box(backWall, 0.035, doorH, 0.1, 0, doorH / 2, back, truss);
+  structure = new THREE.Group(); venue.add(structure);
+  const frames = Math.max(2, Math.round(d / 4.3));
+  for (let i = 0; i <= frames; i++) {
+    const z = back + 0.2 + (d - 0.4) * i / frames;
+    for (const x of [-half + 0.12, half - 0.12]) {
+      box(structure, 0.18, h, 0.22, x, h / 2, z, steel);
+      box(structure, 0.42, 0.1, 0.42, x, 0.1, z, steel);
+    }
+    beam(structure, [-half, h, z], [half, h, z], 0.12, truss);
+    beam(structure, [-half, h, z], [0, peak, z], 0.11, truss);
+    beam(structure, [0, peak, z], [half, h, z], 0.11, truss);
+    for (let j = 1; j < 6; j++) {
+      const x = -half + w * j / 6, next = -half + w * (j + 1) / 6;
+      beam(structure, [x, h, z], [x, peak - Math.abs(x) / half * rise, z], 0.065, truss);
+      if (j < 5) beam(structure, [x, h, z], [next, peak - Math.abs(next) / half * rise, z], 0.065, truss);
+    }
+    box(structure, Math.min(4, w * 0.6), 0.055, 0.16, 0, h - 0.15, z, mat('#f6f4d7'));
   }
-  beam(structure, [-6, 5.2, z], [6, 5.2, z], 0.12, truss);
-  beam(structure, [-6, 5.2, z], [0, 7.2, z], 0.11, truss);
-  beam(structure, [0, 7.2, z], [6, 5.2, z], 0.11, truss);
-  for (let x = -4; x <= 4; x += 2) { const y = 7.2 - Math.abs(x) / 3; beam(structure, [x, 5.2, z], [x, y, z], 0.065, truss); if (x < 4) beam(structure, [x, 5.2, z], [x + 2, 7.2 - Math.abs(x + 2) / 3, z], 0.065, truss); }
-  box(structure, 4, 0.055, 0.16, 0, 5.05, z, mat('#f6f4d7'));
+  for (const x of [-half + 0.15, half - 0.15]) box(structure, 0.16, 0.25, d, x, h, 0, steel);
+  roof = new THREE.Group(); venue.add(roof);
+  const sheetCount = Math.max(4, Math.round(d / 5.5)), sheetDepth = d / sheetCount;
+  for (const side of [-1, 1]) for (let i = 0; i < sheetCount; i++) {
+    const sheet = box(roof, Math.hypot(half, rise), 0.08, sheetDepth - 0.04, side * w / 4, (h + peak) / 2, back + (i + 0.5) * sheetDepth,
+      i % 2 ? new THREE.MeshBasicMaterial({ color: '#eaf2ed', side: THREE.DoubleSide }) : mat('#929990'));
+    sheet.rotation.z = -side * Math.atan2(rise, half);
+  }
+  roof.visible = $('roof').checked;
+  const extent = Math.max(w, d, peak * 2);
+  controls.maxDistance = extent * 3; camera.far = extent * 8; camera.updateProjectionMatrix();
+  sun.position.set(-w / 2, Math.max(17, peak + 10), d / 3);
+  sun.shadow.camera.left = -extent; sun.shadow.camera.right = extent;
+  sun.shadow.camera.top = extent; sun.shadow.camera.bottom = -extent; sun.shadow.camera.far = extent * 5; sun.shadow.camera.updateProjectionMatrix();
+  updateRoomFields();
 }
-for (const x of [-5.85, 5.85]) box(structure, 0.16, 0.25, 22, x, 5.2, 0, steel);
-const roof = new THREE.Group(); scene.add(roof); roof.visible = false;
-for (const side of [-1, 1]) for (const z of [-8.25, -2.75, 2.75, 8.25]) {
-  const sheet = box(roof, 6.32, 0.08, 5.45, side * 3, 6.2, z, z === -2.75 || z === 8.25 ? new THREE.MeshBasicMaterial({ color: '#eaf2ed', side: THREE.DoubleSide }) : mat('#929990'));
-  sheet.rotation.z = -side * Math.atan(1 / 3);
+function updateRoomFields() {
+  for (const key of ['width', 'depth', 'eaves', 'ridge']) $('room-' + key).value = ROOM[key];
+  $('venue-dimensions').textContent = `${ROOM.width} × ${ROOM.depth} m · approximate model`;
+  $('area').textContent = `${Number((ROOM.width * ROOM.depth).toFixed(2))} m²`;
+  $('room-error').textContent = '';
 }
+buildRoom();
 const furniture = new THREE.Group(); scene.add(furniture);
 let items = [], selected = null, nextId = 1, undoStack = [], redoStack = [], view = 'orbit';
 
 function status(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(status.timer); status.timer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
-function save() { try { localStorage.setItem('warehouse-layout-v1', JSON.stringify(items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })))); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
-function snapshot() { return structuredClone(items); }
+function save() { try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 2, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
+function snapshot() { return structuredClone({ room: ROOM, items }); }
 function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack = []; }
 function meshFor(item) {
   const g = new THREE.Group(); g.userData.id = item.id;
@@ -162,31 +198,49 @@ function renderItems() {
 function setItems(data) { items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
 function findSpot(type, preferred, rotation = 0) {
   const candidates = preferred ? [preferred] : [];
-  for (let z = 0; z <= 9; z += 1.5) for (let x = -4.5; x <= 4.5; x += 1.5) for (const sign of z ? [1, -1] : [1]) candidates.push({ x, z: z * sign });
+  for (let z = 0; z <= ROOM.depth / 2 - 0.5; z += 1.5) for (let x = -ROOM.width / 2 + 1.5; x <= ROOM.width / 2 - 1.5; x += 1.5) for (const sign of z ? [1, -1] : [1]) candidates.push({ x, z: z * sign });
   return candidates.map(p => constrain({ type, ...p, rotation })).find(p => items.every(i => !overlaps(p, i)));
 }
 function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
 function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; checkpoint(); items[i] = constrain(fn({ ...items[i] })); renderItems(); }
 function remove() { if (selected === null) return; checkpoint(); items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
-function history(from, to) { if (!from.length) return; to.push(snapshot()); items = from.pop(); selected = null; renderItems(); }
+function history(from, to) { if (!from.length) return; to.push(snapshot()); const state = from.pop(); Object.assign(ROOM, state.room); items = state.items; selected = null; buildRoom(); renderItems(); setView(view); }
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
 $('rotate').onclick = () => changeSelected(i => ({ ...i, rotation: (i.rotation + Math.PI / 4) % (Math.PI * 2) }));
 $('delete').onclick = remove;
 $('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
 for (const axis of ['x', 'z']) $('pos-' + axis).onchange = e => { const value = e.target.valueAsNumber; if (Number.isFinite(value)) changeSelected(i => ({ ...i, [axis]: value })); else updateInspector(); };
 $('undo').onclick = () => history(undoStack, redoStack); $('redo').onclick = () => history(redoStack, undoStack);
-$('reset').onclick = () => { checkpoint(); setItems(initialLayout()); status('Original layout restored. Undo to recover your changes.'); };
+$('reset').onclick = () => { checkpoint(); Object.assign(ROOM, DEFAULT_ROOM); buildRoom(); setItems(initialLayout()); setView(view); status('Original layout restored. Undo to recover your changes.'); };
+$('room-form').onsubmit = e => {
+  e.preventDefault();
+  const room = Object.fromEntries(['width', 'depth', 'eaves', 'ridge'].map(key => [key, $('room-' + key).valueAsNumber]));
+  if (!validRoom(room)) { $('room-error').textContent = 'Use width/length 6–60 m, wall height 3–15 m, and a roof peak at least 0.5 m higher (up to 20 m).'; return; }
+  if (Object.keys(room).every(key => room[key] === ROOM[key])) return;
+  checkpoint(); Object.assign(ROOM, room);
+  let moved = 0;
+  items = items.map(item => { const next = constrain(item); if (next.x !== item.x || next.z !== item.z) moved++; return next; });
+  buildRoom(); renderItems(); setView(view);
+  const collision = items.some((item, i) => items.slice(i + 1).some(other => overlaps(item, other)));
+  $('room-error').textContent = collision ? 'Some furniture overlaps. Rearrange it to make space, or undo the resize.' : '';
+  status(moved ? `Room resized. ${moved} objects moved inside the boundary.` : 'Warehouse dimensions updated');
+};
 $('roof').onchange = e => roof.visible = e.target.checked;
-$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 1, units: 'metres', approximate: true, room: ROOM, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 2, units: 'metres', approximate: true, room: ROOM, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
 function setView(name) {
   view = name;
   for (const key of ['orbit', 'top', 'inside']) $('view-' + key).classList.toggle('active', name === key);
   document.querySelector('.canvas-label').style.display = name === 'inside' ? 'none' : '';
   controls.enableRotate = name !== 'top'; controls.maxPolarAngle = Math.PI / 2 - 0.015;
-  if (name === 'top') { camera.position.set(0, 34, 0.01); controls.target.set(0, 0, 0); }
-  else if (name === 'inside') { camera.position.set(0, 1.7, 9.6); controls.target.set(0, 1.7, -6); }
-  else { camera.position.set(17, 16, 23); controls.target.set(0, 1.3, 0); }
+  fitCamera();
   roof.visible = name === 'inside'; $('roof').checked = roof.visible;
+  controls.update();
+}
+function fitCamera() {
+  const name = view;
+  if (name === 'top') { camera.position.set(0, Math.max(ROOM.depth, ROOM.width / camera.aspect) * 1.7, 0.01); controls.target.set(0, 0, 0); }
+  else if (name === 'inside') { camera.position.set(0, 1.7, ROOM.depth / 2 - 1.4); controls.target.set(0, 1.7, -ROOM.depth / 3); }
+  else { const vertical = THREE.MathUtils.degToRad(camera.fov), horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect); const radius = Math.hypot(ROOM.width, ROOM.depth, ROOM.ridge) / 2; const distance = radius / Math.sin(Math.min(vertical, horizontal) / 2) * 1.03; controls.target.set(0, ROOM.ridge / 3, 0); camera.position.copy(new THREE.Vector3(0.55, 0.52, 0.74).normalize().multiplyScalar(distance).add(controls.target)); }
   controls.update();
 }
 for (const name of ['orbit', 'top', 'inside']) $('view-' + name).onclick = () => setView(name);
@@ -229,10 +283,10 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { selected = null; updateInspector(); }
 });
 let restored = false;
-try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); if (validLayout(data)) { setItems(data); restored = true; } } } catch { }
+try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); if (Array.isArray(data) && validLayout(data)) { setItems(data); restored = true; } else if (data && validRoom(data.room) && validLayout(data.furniture)) { Object.assign(ROOM, data.room); buildRoom(); setItems(data.furniture); restored = true; } } } catch { }
 if (!restored) setItems(initialLayout());
 setView('orbit'); $('loading').remove();
-new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); }).observe(viewport);
+new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); fitCamera(); }).observe(viewport);
 function frame() {
   requestAnimationFrame(frame); controls.update();
   const inside = view === 'inside';
