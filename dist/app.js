@@ -76,7 +76,7 @@ const woodTex = texture('wood');
 const wood = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.63 });
 const steel = mat('#343e3b', 0.5), truss = mat('#a0aaa1', 0.5), plaster = mat('#c1bbaa');
 const venue = new THREE.Group(); scene.add(venue);
-let leftWall, rightWall, backWall, structure, roof, entranceDoors = [];
+let leftWall, rightWall, backWall, frontWall, structure, roof, entranceDoors = [];
 const sharedMaterials = new Set([concrete, brick, steel, truss, plaster]);
 function buildRoom() {
   const materials = new Set();
@@ -91,8 +91,10 @@ function buildRoom() {
   box(base, w, 0.12, d, 0, -0.02, 0, concrete);
   const gridSize = Math.max(w, d), grid = new THREE.GridHelper(gridSize, Math.ceil(gridSize * 2), '#7e8c73', '#9da98e');
   grid.position.y = 0.045; grid.material.transparent = true; grid.material.opacity = 0.12; venue.add(grid);
-  leftWall = new THREE.Group(); rightWall = new THREE.Group(); backWall = new THREE.Group();
-  venue.add(leftWall, rightWall, backWall);
+  leftWall = new THREE.Group(); rightWall = new THREE.Group(); backWall = new THREE.Group(); frontWall = new THREE.Group();
+  venue.add(leftWall, rightWall, backWall, frontWall);
+  // Close the end opposite the entrance; it follows the editable room dimensions.
+  box(frontWall, w, h, 0.25, 0, h / 2, d / 2, brick);
   function sideWall(group, x) {
     const sill = Math.min(1.1, h * 0.22), windowTop = h * 0.67;
     box(group, 0.24, sill, d, x, sill / 2, 0, plaster);
@@ -320,7 +322,7 @@ function paintTour() {
   camera.position.fromArray(shot.position); camera.up.fromArray(shot.up); camera.lookAt(new THREE.Vector3(...shot.target));
   camera.fov = shot.fov; camera.updateProjectionMatrix();
   controls.target.fromArray(shot.target);
-  leftWall.visible = rightWall.visible = backWall.visible = true;
+  leftWall.visible = rightWall.visible = backWall.visible = frontWall.visible = true;
   structure.visible = shot.structureVisible;
   roof.visible = shot.roofOpacity > 0.001;
   roof.traverse(mesh => { if (mesh.isMesh) { mesh.material.transparent = shot.roofOpacity < 1; mesh.material.opacity = shot.roofOpacity; mesh.material.depthWrite = shot.roofOpacity > 0.95; } });
@@ -556,6 +558,7 @@ function frame(now) {
   leftWall.visible = inside || camera.position.x > -1;
   rightWall.visible = inside || camera.position.x < 1;
   backWall.visible = inside || camera.position.z > -1;
+  frontWall.visible = inside || camera.position.z < 1;
   structure.visible = view !== 'top'; roof.visible = $('roof').checked;
   renderer.render(scene, camera);
 }
