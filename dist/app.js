@@ -1,3 +1,5 @@
+import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd } from './crowd.js';
+import { crowdView } from './crowd-view.js';
 import * as THREE from 'three';
 import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
@@ -154,9 +156,28 @@ const furniture = new THREE.Group(); scene.add(furniture);
 let eventPlan = null;
 let items = [], selected = null, nextId = 1, undoStack = [], redoStack = [], view = 'orbit';
 
+let crowdConfig = { ...DEFAULT_CROWD }, crowd = { people: [] }, crowdFrame = null;
+const paintPeople = crowdView(scene);
+function rebuildPeople(preservePositions = false) {
+  if (!preservePositions) crowd = createCrowd(crowdConfig, ROOM, items, CATALOG);
+  paintPeople(crowd);
+  $('people-count').value = crowdConfig.count || 100; $('people-behavior').value = crowdConfig.behavior;
+  $('people-pause').disabled = !crowd.people.length; $('people-clear').disabled = !crowdConfig.count;
+  $('people-pause').textContent = crowdConfig.paused ? 'Resume people' : 'Pause people';
+  $('people-pause').setAttribute('aria-pressed', String(crowdConfig.paused));
+  $('people-status').textContent = !crowdConfig.count ? 'No people added yet.' :
+    `${crowd.people.length} people · ${crowd.seated} sitting · ${crowd.walking} walking · ${crowd.standing} standing${crowdConfig.paused ? ' · paused' : ''}.${crowd.people.length < crowdConfig.count ? ` Only ${crowd.people.length} of ${crowdConfig.count} could be placed; make more floor space.` : ''}${crowdConfig.behavior === 'seated' && crowd.standing ? ' Add chairs or couches for more seats.' : ''}`;
+}
+$('people-form').onsubmit = e => {
+  e.preventDefault(); const next = { count: $('people-count').valueAsNumber, behavior: $('people-behavior').value, paused: crowdConfig.paused };
+  if (!validCrowd(next)) return status('Choose a whole number from 0 to 500.');
+  checkpoint(); crowdConfig = next; rebuildPeople(); updateInspector(); save();
+};
+$('people-clear').onclick = () => { checkpoint(); crowdConfig = { ...DEFAULT_CROWD }; rebuildPeople(); updateInspector(); save(); };
+$('people-pause').onclick = () => { checkpoint(); crowdConfig.paused = !crowdConfig.paused; rebuildPeople(true); updateInspector(); save(); };
 function status(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(status.timer); status.timer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
-function save() { if (!libraryReady || !startupReady) { $('save-state').textContent = 'Saving paused — reload to restore your library'; return; } try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 3, eventPlan, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
-function snapshot() { return structuredClone({ room: ROOM, items, eventPlan }); }
+function save() { if (!libraryReady || !startupReady) { $('save-state').textContent = 'Saving paused — reload to restore your library'; return; } try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 3, eventPlan, crowd: crowdConfig, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
+function snapshot() { return structuredClone({ room: ROOM, items, eventPlan, crowdConfig }); }
 function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack = []; }
 function meshFor(item) {
   const model = customModels.get(item.type);
@@ -208,7 +229,7 @@ function updateInspector() {
 function renderItems() {
   // Geometry/materials belong to individual furniture; shared wood and steel stay alive.
   for (const child of [...furniture.children]) { child.traverse(m => { if (!child.userData.customModel && m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
-  for (const item of items) furniture.add(meshFor(item)); updateInspector(); save();
+  for (const item of items) furniture.add(meshFor(item)); rebuildPeople(); updateInspector(); save();
 }
 function setItems(data, plan = null) { eventPlan = plan; items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
 function fitsRoom(item, room = ROOM) {
@@ -225,14 +246,14 @@ function findSpot(type, preferred, rotation = 0) {
 function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); eventPlan = null; item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
 function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = constrain(fn({ ...items[i] })); if (!fitsRoom(next)) return status('This object does not fit at that rotation. Enlarge the room first.'); checkpoint(); eventPlan = null; items[i] = next; renderItems(); }
 function remove() { if (selected === null) return; checkpoint(); eventPlan = null; items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
-function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; eventPlan = previous.eventPlan; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
+function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; crowdConfig = previous.crowdConfig; eventPlan = previous.eventPlan; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
 $('rotate').onclick = () => changeSelected(i => ({ ...i, rotation: (i.rotation + Math.PI / 4) % (Math.PI * 2) }));
 $('delete').onclick = remove;
 $('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); eventPlan = null; const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
 for (const axis of ['x', 'z']) $('pos-' + axis).onchange = e => { const value = e.target.valueAsNumber; if (Number.isFinite(value)) changeSelected(i => ({ ...i, [axis]: value })); else updateInspector(); };
 $('undo').onclick = () => history(undoStack, redoStack); $('redo').onclick = () => history(redoStack, undoStack);
-$('reset').onclick = () => { checkpoint(); Object.assign(ROOM, DEFAULT_ROOM); buildRoom(); setItems(initialLayout()); previewActivity(); setView(view); status('Original layout restored. Undo to recover your changes.'); };
+$('reset').onclick = () => { checkpoint(); crowdConfig = { ...DEFAULT_CROWD }; Object.assign(ROOM, DEFAULT_ROOM); buildRoom(); setItems(initialLayout()); previewActivity(); setView(view); status('Original layout restored. Undo to recover your changes.'); };
 $('room-form').onsubmit = e => {
   e.preventDefault();
   const room = Object.fromEntries(['width', 'depth', 'eaves', 'ridge'].map(key => [key, $('room-' + key).valueAsNumber]));
@@ -256,7 +277,7 @@ function exportedModels() {
     return { id: type, name: record.name, filename: record.filename, glbBase64: btoa(binary) };
   });
 }
-$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, eventPlan, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, eventPlan, crowd: crowdConfig, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
 const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '' };
 function tourPlan() { return createTour(ROOM, items, camera.aspect); }
 function setPlaying(playing) {
@@ -363,7 +384,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   furniture.children.find(g => g.userData.id === drag.id).position.set(items[i].x, 0, items[i].z);
   renderer.domElement.style.cursor = 'grabbing'; updateInspector();
 });
-function endDrag() { if (!drag) return; drag = null; controls.enabled = true; save(); renderer.domElement.style.cursor = 'grab'; }
+function endDrag() { if (!drag) return; drag = null; rebuildPeople(); controls.enabled = true; save(); renderer.domElement.style.cursor = 'grab'; }
 renderer.domElement.addEventListener('pointerup', endDrag); renderer.domElement.addEventListener('pointercancel', endDrag); renderer.domElement.addEventListener('lostpointercapture', endDrag);
 window.addEventListener('keydown', e => {
   if (!startupReady) return;
@@ -457,6 +478,7 @@ try {
   const raw = localStorage.getItem('warehouse-layout-v1') || localStorage.getItem('warehouse-layout-v2');
   if (raw) {
     const data = JSON.parse(raw);
+    if (validCrowd(data?.crowd)) crowdConfig = { ...data.crowd };
     const savedItems = Array.isArray(data) ? data : data?.furniture;
     if (Array.isArray(savedItems) && savedItems.some(i => typeof i?.type === 'string' && i.type.startsWith('model_') && !customModels.has(i.type))) {
       libraryReady = false; $('library-status').textContent = 'A saved model is missing. Saving is paused to preserve your layout. Restore the browser library or reload after reopening storage.';
@@ -487,6 +509,9 @@ setView('orbit'); $('loading').remove();
 new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); if (view !== 'inside') fitCamera(); }).observe(viewport);
 function frame(now) {
   requestAnimationFrame(frame);
+  const dt = crowdFrame === null || !Number.isFinite(now) ? 0 : (now - crowdFrame) / 1000;
+  crowdFrame = Number.isFinite(now) ? now : null;
+  if (!crowdConfig.paused && !document.hidden && crowd.people.length) { advanceCrowd(crowd, dt); paintPeople(crowd); }
   if (view === 'video') {
     if (tourState.playing && !document.hidden && Number.isFinite(now)) {
       if (tourState.lastFrame !== null) tourState.time = Math.min(TOUR_DURATION, tourState.time + Math.min(0.1, (now - tourState.lastFrame) / 1000));
