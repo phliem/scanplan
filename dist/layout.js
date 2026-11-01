@@ -6,6 +6,7 @@ export function validRoom(room) {
     && room.eaves >= 3 && room.eaves <= 15 && room.ridge >= room.eaves + 0.5 && room.ridge <= 20;
 }
 export const CATALOG = {
+  stage: { name: 'Stage', width: 6, depth: 2.5, height: 0.6, color: '#404b50' },
   couch: { name: 'Couch', width: 2.3, depth: 0.95, height: 0.95, color: '#9b4541' },
   table: { name: 'Work table', width: 2.0, depth: 0.9, height: 0.75, color: '#bd8a4b' },
   chair: { name: 'Chair', width: 0.5, depth: 0.55, height: 0.85, color: '#3c5049' },
@@ -38,4 +39,50 @@ export function initialLayout() {
   }
   items.push({ type: 'couch', x: -2, z: 7, rotation: 0 }, { type: 'couch', x: 2, z: 7, rotation: 0 }, { type: 'table', x: 0, z: 4.8, rotation: 0 });
   return items;
+}
+
+export const ACTIVITIES = {
+  hackathon: { name: 'Hackathon', description: 'Team worktables with four chairs each and a central aisle.' },
+  theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
+};
+
+// Deterministic arrangements in the existing estimated room, with furniture gaps.
+// These are planning assumptions, not a fire, accessibility or occupancy assessment.
+export function activityLayout(activity, requested, room = ROOM) {
+  if (!Object.hasOwn(ACTIVITIES, activity)) throw new RangeError('Choose an activity.');
+  if (!Number.isInteger(requested) || requested < 1 || requested > 1000) throw new RangeError('Enter a whole number from 1 to 1,000.');
+  if (!validRoom(room)) throw new RangeError('Use valid room dimensions.');
+  const items = [], slots = [];
+  const add = (type, x, z, rotation = 0) => items.push(constrain({ type, x, z, rotation }, room));
+  let capacity;
+  if (activity === 'hackathon') {
+    const columns = [];
+    for (let x = 1.9; x <= room.width / 2 - 1.15 + 1e-9; x += 2.2) columns.push(-x, x);
+    columns.sort((a, b) => a - b);
+    for (let z = -room.depth / 2 + 2.3; z <= room.depth / 2 - 2.3 + 1e-9; z += 2.9)
+      for (const x of columns) if (slots.length < 40) slots.push({ x, z });
+    capacity = slots.length * 4; // At most 40 tables + 160 chairs = 200 objects.
+    let remaining = Math.min(requested, capacity);
+    for (const { x, z } of slots) {
+      if (!remaining) break;
+      add('table', x, z);
+      for (const dz of [-0.85, 0.85]) for (const dx of [-0.6, 0.6]) {
+        if (!remaining) break;
+        add('chair', x + dx, z + dz, dz < 0 ? 0 : Math.PI);
+        remaining--;
+      }
+    }
+  } else {
+    const columns = [];
+    for (let x = 1; x <= room.width / 2 - 1.75 + 1e-9; x += 0.65) columns.push(-x, x);
+    columns.sort((a, b) => a - b);
+    const stageFits = room.width >= CATALOG.stage.width + 0.3;
+    if (stageFits) for (let z = -room.depth / 2 + 5.3; z <= room.depth / 2 - 3.4 + 1e-9; z += 0.95)
+      for (const x of columns) if (slots.length < 199) slots.push({ x, z });
+    capacity = slots.length;
+    if (capacity) add('stage', 0, -room.depth / 2 + 2.2);
+    for (const { x, z } of slots.slice(0, requested)) add('chair', x, z, Math.PI);
+  }
+  const seated = Math.min(requested, capacity);
+  return { activity, requested, seated, capacity, shortfall: requested - seated, items };
 }
