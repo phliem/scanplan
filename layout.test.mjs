@@ -55,3 +55,35 @@ test('activity layouts reject invalid requests', async () => {
   for (const requested of [0, -1, NaN, Infinity, 1.5, '100', 1001]) assert.throws(() => activityLayout('hackathon', requested), RangeError);
   for (const activity of ['wedding', '__proto__', null]) assert.throws(() => activityLayout(activity, 100), RangeError);
 });
+test('resized rooms constrain furniture without changing its dimensions', () => {
+  const small = { width: 6, depth: 8, eaves: 3, ridge: 4 };
+  for (const type of Object.keys(CATALOG)) for (const rotation of [0, Math.PI / 6, Math.PI / 4, Math.PI / 2]) {
+    const target = type === 'stage' ? { ...small, width: 8 } : small;
+    const item = constrain({ type, rotation, x: 50, z: -50 }, target), b = bounds(item);
+    assert.ok(Math.abs(item.x) + b.x <= target.width / 2 - 0.149);
+    assert.ok(Math.abs(item.z) + b.z <= target.depth / 2 - 0.149);
+    assert.equal(item.rotation, rotation);
+  }
+});
+test('room dimensions reject invalid ranges and roofs below the walls', async () => {
+  const { validRoom, DEFAULT_ROOM } = await import('./dist/layout.js');
+  assert.equal(validRoom(DEFAULT_ROOM), true);
+  assert.equal(validRoom({ width: 60, depth: 60, eaves: 15, ridge: 20 }), true);
+  for (const room of [null, {}, { ...DEFAULT_ROOM, width: NaN }, { ...DEFAULT_ROOM, depth: Infinity }, { ...DEFAULT_ROOM, width: 5.9 }, { ...DEFAULT_ROOM, depth: 61 }, { ...DEFAULT_ROOM, eaves: 2.9 }, { ...DEFAULT_ROOM, ridge: 5.3 }, { ...DEFAULT_ROOM, ridge: 21 }]) assert.equal(validRoom(room), false);
+});
+
+test('activity templates adapt to resized rooms without clamping or exceeding object limits', async () => {
+  const { activityLayout, DEFAULT_ROOM } = await import('./dist/layout.js');
+  for (const activity of ['hackathon', 'theatre']) {
+    for (const width of [6, 6.3, 8, 12, 20, 60]) for (const depth of [6, 8, 12, 22, 60]) {
+      const room = { ...DEFAULT_ROOM, width, depth }, plan = activityLayout(activity, 1000, room);
+      assert.ok(validLayout(plan.items));
+      assert.equal(plan.items.filter(i => i.type === 'chair').length, plan.seated);
+      assert.equal(plan.seated + plan.shortfall, 1000);
+      for (let a = 0; a < plan.items.length; a++) {
+        assert.deepEqual(constrain(plan.items[a], room), plan.items[a]);
+        for (let b = a + 1; b < plan.items.length; b++) assert.equal(overlaps(plan.items[a], plan.items[b]), false, `${activity} ${width} x ${depth}: ${a}, ${b}`);
+      }
+    }
+  }
+});

@@ -1,4 +1,10 @@
-export const ROOM = { width: 12, depth: 22, eaves: 5.2, ridge: 7.2 };
+export const DEFAULT_ROOM = Object.freeze({ width: 12, depth: 22, eaves: 5.2, ridge: 7.2 });
+export const ROOM = { ...DEFAULT_ROOM };
+export function validRoom(room) {
+  return !!room && ['width', 'depth', 'eaves', 'ridge'].every(k => typeof room[k] === 'number' && Number.isFinite(room[k]))
+    && room.width >= 6 && room.width <= 60 && room.depth >= 6 && room.depth <= 60
+    && room.eaves >= 3 && room.eaves <= 15 && room.ridge >= room.eaves + 0.5 && room.ridge <= 20;
+}
 export const CATALOG = {
   stage: { name: 'Stage', width: 6, depth: 2.5, height: 0.6, color: '#404b50' },
   couch: { name: 'Couch', width: 2.3, depth: 0.95, height: 0.95, color: '#9b4541' },
@@ -9,9 +15,9 @@ export function bounds(item) {
   const d = CATALOG[item.type], c = Math.abs(Math.cos(item.rotation)), s = Math.abs(Math.sin(item.rotation));
   return { x: (d.width * c + d.depth * s) / 2, z: (d.width * s + d.depth * c) / 2 };
 }
-export function constrain(item) {
+export function constrain(item, room = ROOM) {
   const b = bounds(item);
-  return { ...item, x: Math.max(-ROOM.width / 2 + b.x + 0.15, Math.min(ROOM.width / 2 - b.x - 0.15, item.x)), z: Math.max(-ROOM.depth / 2 + b.z + 0.15, Math.min(ROOM.depth / 2 - b.z - 0.15, item.z)) };
+  return { ...item, x: Math.max(-room.width / 2 + b.x + 0.15, Math.min(room.width / 2 - b.x - 0.15, item.x)), z: Math.max(-room.depth / 2 + b.z + 0.15, Math.min(room.depth / 2 - b.z - 0.15, item.z)) };
 }
 export function overlaps(a, b) {
   // Separating-axis test for rotated rectangular furniture footprints.
@@ -42,17 +48,23 @@ export const ACTIVITIES = {
 
 // Deterministic arrangements in the existing estimated room, with furniture gaps.
 // These are planning assumptions, not a fire, accessibility or occupancy assessment.
-export function activityLayout(activity, requested) {
+export function activityLayout(activity, requested, room = ROOM) {
   if (!Object.hasOwn(ACTIVITIES, activity)) throw new RangeError('Choose an activity.');
   if (!Number.isInteger(requested) || requested < 1 || requested > 1000) throw new RangeError('Enter a whole number from 1 to 1,000.');
-  const capacity = activity === 'hackathon' ? 112 : 180;
-  const seated = Math.min(requested, capacity), items = [];
-  const add = (type, x, z, rotation = 0) => items.push({ type, x, z, rotation });
+  if (!validRoom(room)) throw new RangeError('Use valid room dimensions.');
+  const items = [], slots = [];
+  const add = (type, x, z, rotation = 0) => items.push(constrain({ type, x, z, rotation }, room));
+  let capacity;
   if (activity === 'hackathon') {
-    let remaining = seated;
-    for (let row = 0; row < 7 && remaining; row++) for (const x of [-4.1, -1.9, 1.9, 4.1]) {
+    const columns = [];
+    for (let x = 1.9; x <= room.width / 2 - 1.15 + 1e-9; x += 2.2) columns.push(-x, x);
+    columns.sort((a, b) => a - b);
+    for (let z = -room.depth / 2 + 2.3; z <= room.depth / 2 - 2.3 + 1e-9; z += 2.9)
+      for (const x of columns) if (slots.length < 40) slots.push({ x, z });
+    capacity = slots.length * 4; // At most 40 tables + 160 chairs = 200 objects.
+    let remaining = Math.min(requested, capacity);
+    for (const { x, z } of slots) {
       if (!remaining) break;
-      const z = -8.7 + row * 2.9;
       add('table', x, z);
       for (const dz of [-0.85, 0.85]) for (const dx of [-0.6, 0.6]) {
         if (!remaining) break;
@@ -61,12 +73,16 @@ export function activityLayout(activity, requested) {
       }
     }
   } else {
-    add('stage', 0, -8.8);
-    for (let i = 0; i < seated; i++) {
-      const column = i % 12, row = Math.floor(i / 12);
-      const x = column < 6 ? -4.25 + column * 0.65 : 1 + (column - 6) * 0.65;
-      add('chair', x, -5.7 + row * 0.95, Math.PI);
-    }
+    const columns = [];
+    for (let x = 1; x <= room.width / 2 - 1.75 + 1e-9; x += 0.65) columns.push(-x, x);
+    columns.sort((a, b) => a - b);
+    const stageFits = room.width >= CATALOG.stage.width + 0.3;
+    if (stageFits) for (let z = -room.depth / 2 + 5.3; z <= room.depth / 2 - 3.4 + 1e-9; z += 0.95)
+      for (const x of columns) if (slots.length < 199) slots.push({ x, z });
+    capacity = slots.length;
+    if (capacity) add('stage', 0, -room.depth / 2 + 2.2);
+    for (const { x, z } of slots.slice(0, requested)) add('chair', x, z, Math.PI);
   }
+  const seated = Math.min(requested, capacity);
   return { activity, requested, seated, capacity, shortfall: requested - seated, items };
 }
