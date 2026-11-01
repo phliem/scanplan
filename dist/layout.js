@@ -64,12 +64,21 @@ export const ACTIVITIES = {
   theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
 };
 
+export const LAYOUT_STYLES = {
+  photo: { name: 'Photo reference', description: 'Long worktables along the sides, with central lounges.' },
+  pockets: { name: 'Creative pockets', description: 'Paired and single tables, gentle angles and tucked-away sofa corners.' },
+  commons: { name: 'Warehouse commons', description: 'Mixed table directions, generous gaps and social lounge pockets.' },
+  ramble: { name: 'Loose & lively', description: 'Staggered tables, playful angles and a winding route through the room.' },
+};
+
 // Deterministic arrangements in the existing estimated room, with furniture gaps.
 // These are planning assumptions, not a fire, accessibility or occupancy assessment.
-export function activityLayout(activity, requested, room = ROOM) {
+export function activityLayout(activity, requested, room = ROOM, layoutStyle = 'photo') {
   if (!Object.hasOwn(ACTIVITIES, activity)) throw new RangeError('Choose an activity.');
   if (!Number.isInteger(requested) || requested < 1 || requested > 1000) throw new RangeError('Enter a whole number from 1 to 1,000.');
   if (!validRoom(room)) throw new RangeError('Use valid room dimensions.');
+  if (!Object.hasOwn(LAYOUT_STYLES, layoutStyle)) throw new RangeError('Choose a layout style.');
+  if (activity === 'hackathon' && layoutStyle !== 'photo') return relaxedLayout(requested, room, layoutStyle);
   const items = [], slots = [];
   const add = (type, x, z, rotation = 0) => items.push(constrain({ type, x, z, rotation }, room));
   let capacity;
@@ -167,4 +176,66 @@ export function activityLayout(activity, requested, room = ROOM) {
   if (activity === 'hackathon') items.sort((a, b) => Number(isCouch(a.type) || CATALOG[a.type].kind === 'refreshment') - Number(isCouch(b.type) || CATALOG[b.type].kind === 'refreshment'));
   const seated = Math.min(requested, capacity);
   return { activity, requested, seated, capacity, shortfall: requested - seated, items };
+}
+
+function relaxedLayout(requested, room, layoutStyle) {
+  if (room.width < 14 || room.depth < 28) throw new RangeError('Relaxed layouts need a room at least 14 × 28 m.');
+  const schemes = {
+    pockets: { lounges: [[2, 0], [5, 2]], refreshments: [7, 0], gaps: [[0, 3], [4, 1]], seed: 17 },
+    commons: { lounges: [[4, 0], [1, 2]], refreshments: [7, 3], gaps: [[0, 0], [5, 2]], seed: 43 },
+    ramble: { lounges: [[1, 0], [6, 2]], refreshments: [0, 3], gaps: [[3, 1], [4, 2]], seed: 79 },
+  };
+  const scheme = schemes[layoutStyle], items = [], slots = [];
+  const outerX = room.width / 2 - 1.95;
+  const xs = Array.from({ length: 4 }, (_, i) => -outerX + i * outerX * 2 / 3);
+  const zs = Array.from({ length: 8 }, (_, i) => -room.depth / 2 + 2 + i * (room.depth - 4.1) / 7);
+  let seed = scheme.seed;
+  const random = () => { seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296; };
+  const transform = (type, x, z, rotation, dx = 0, dz = 0, turn = 0) => ({ type,
+    x: x + Math.cos(rotation) * dx + Math.sin(rotation) * dz,
+    z: z - Math.sin(rotation) * dx + Math.cos(rotation) * dz, rotation: rotation + turn });
+  scheme.lounges.forEach(([row, col], group) => {
+    const x = (xs[col] + xs[col + 1]) / 2, z = zs[row];
+    const angle = group ? -0.06 : 0.06;
+    for (let seat = 0; seat < 4; seat++) items.push(transform(COUCH_TYPES[group * 4 + seat], x, z, angle,
+      seat % 2 ? 1.15 : -1.15, seat < 2 ? -1.1 : 1.1, seat < 2 ? 0 : Math.PI));
+  });
+  const [refreshRow, refreshCol] = scheme.refreshments;
+  const rx = xs[refreshCol], rz = zs[refreshRow];
+  items.push(transform('coffee', rx, rz, 0, -0.85, -0.3), transform('tea', rx, rz, 0, 0.85, -0.3), transform('snacks', rx, rz, 0, 0, 0.65));
+  const reserved = (row, col) => scheme.lounges.some(([r, c]) => row === r && (col === c || col === c + 1))
+    || (row === refreshRow && col === refreshCol) || scheme.gaps.some(([r, c]) => row === r && col === c);
+  for (let row = 0; row < 8; row++) for (let col = 0; col < 4; col++) {
+    if (reserved(row, col)) continue;
+    const stagger = layoutStyle === 'ramble' ? (row % 2 ? 0.24 : -0.24) : 0;
+    const x = xs[col] + stagger + (random() - 0.5) * 0.22;
+    const z = zs[row] + (random() - 0.5) * 0.38;
+    const angle = (random() - 0.5) * (layoutStyle === 'ramble' ? 0.32 : 0.2);
+    const rotation = angle + (layoutStyle === 'commons' && (row + col) % 3 === 0 ? Math.PI / 2 : 0);
+    slots.push({ x, z, rotation, row, col });
+  }
+  if (layoutStyle === 'pockets') {
+    // Twelve of the 25 tables make six end-to-end pairs; the rest stay loose.
+    for (const [row, col] of [[0, 0], [1, 2], [3, 0], [4, 2], [5, 0], [6, 2]]) {
+      const a = slots.find(s => s.row === row && s.col === col);
+      const b = slots.find(s => s.row === row && s.col === col + 1);
+      const cx = (a.x + b.x) / 2, cz = (a.z + b.z) / 2, angle = (a.rotation + b.rotation) / 2;
+      for (const [slot, offset] of [[a, -1], [b, 1]]) {
+        slot.x = cx + Math.cos(angle) * offset; slot.z = cz - Math.sin(angle) * offset; slot.rotation = angle;
+      }
+    }
+  }
+  const capacity = slots.length * 6, seated = Math.min(requested, capacity);
+  const tableCount = Math.ceil(seated / 6);
+  let remaining = seated;
+  for (let i = 0; i < tableCount; i++) {
+    const index = tableCount === 1 ? Math.floor(slots.length / 2) : Math.round(i * (slots.length - 1) / (tableCount - 1));
+    const { x, z, rotation } = slots[index];
+    items.unshift(transform('table', x, z, rotation));
+    for (const dz of [-0.85, 0.85]) for (const dx of [-0.67, 0, 0.67]) {
+      if (!remaining) break;
+      items.unshift(transform('chair', x, z, rotation, dx, dz, dz < 0 ? 0 : Math.PI)); remaining--;
+    }
+  }
+  return { activity: 'hackathon', layoutStyle, requested, seated, capacity, shortfall: requested - seated, items };
 }

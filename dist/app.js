@@ -7,7 +7,7 @@ import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
 import { MAX_MODEL_BYTES, modelName } from './model-file.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { ROOM, DEFAULT_ROOM, validRoom, bounds, CATALOG, COUCH_TYPES, isCouch, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
+import { ROOM, DEFAULT_ROOM, validRoom, bounds, CATALOG, COUCH_TYPES, isCouch, LAYOUT_STYLES, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 const customModels = new Map();
@@ -235,7 +235,7 @@ function updateInspector() {
     $('collision').textContent = collision ? 'Overlaps another object. Move it to make space.' : `${(item.rotation * 180 / Math.PI % 360 + 360) % 360}° rotation · dimensions in metres`;
   }
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
-  $('layout-name').textContent = eventPlan ? `${ACTIVITIES[eventPlan.activity].name} · ${eventPlan.seated} seats for ${eventPlan.requested} people` : 'Your custom layout';
+  $('layout-name').textContent = eventPlan ? `${ACTIVITIES[eventPlan.activity].name}${eventPlan.layoutStyle ? ` · ${LAYOUT_STYLES[eventPlan.layoutStyle].name}` : ''} · ${eventPlan.seated} seats for ${eventPlan.requested} people` : 'Your custom layout';
   $('object-count').textContent = `${items.length} objects`;
   $('furniture-count').textContent = `${items.filter(i => i.type === 'table' || CATALOG[i.type].kind === 'refreshment').length} tables · ${items.filter(i => isCouch(i.type)).length} couches · ${items.filter(i => i.type === 'chair').length} chairs · ${items.filter(i => i.type === "stage").length} stages${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
 }
@@ -244,7 +244,7 @@ function renderItems() {
   for (const child of [...furniture.children]) { child.traverse(m => { if (!child.userData.customModel && m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
   for (const item of items) furniture.add(meshFor(item)); rebuildPeople(); updateInspector(); save();
 }
-function setItems(data, plan = null) { eventPlan = plan; items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
+function setItems(data, plan = null) { eventPlan = plan; if (plan) $('layout-style').value = plan.layoutStyle || 'photo'; items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
 function fitsRoom(item, room = ROOM) {
   const b = bounds(item);
   return Math.abs(item.x) + b.x <= room.width / 2 - 0.15 + 1e-9 && Math.abs(item.z) + b.z <= room.depth / 2 - 0.15 + 1e-9;
@@ -259,7 +259,7 @@ function findSpot(type, preferred, rotation = 0) {
 function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); eventPlan = null; item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
 function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = constrain(fn({ ...items[i] })); if (!fitsRoom(next)) return status('This object does not fit at that rotation. Enlarge the room first.'); checkpoint(); eventPlan = null; items[i] = next; renderItems(); }
 function remove() { if (selected === null) return; checkpoint(); eventPlan = null; items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
-function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; crowdConfig = previous.crowdConfig; eventPlan = previous.eventPlan; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
+function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; crowdConfig = previous.crowdConfig; eventPlan = previous.eventPlan; if (eventPlan) $('layout-style').value = eventPlan.layoutStyle || 'photo'; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
 for (const type of [...COUCH_TYPES, 'coffee', 'tea', 'snacks']) {
   const d = CATALOG[type], button = document.createElement('button');
   button.type = 'button'; button.dataset.add = type;
@@ -432,11 +432,51 @@ window.addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'r') $('rotate').click();
   if (e.key === 'Escape') { selected = null; updateInspector(); }
 });
+function layoutThumbnail(plan) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `${-ROOM.width / 2 - 0.7} ${-ROOM.depth / 2 - 0.7} ${ROOM.width + 1.4} ${ROOM.depth + 1.4}`);
+  svg.setAttribute('aria-hidden', 'true');
+  const rect = (parent, x, z, width, depth, fill, radius = 0) => {
+    const el = document.createElementNS(ns, 'rect');
+    for (const [key, value] of Object.entries({ x, y: z, width, height: depth, fill, rx: radius })) el.setAttribute(key, value);
+    parent.append(el); return el;
+  };
+  const floor = rect(svg, -ROOM.width / 2, -ROOM.depth / 2, ROOM.width, ROOM.depth, '#f7f2e6');
+  floor.setAttribute('stroke', '#ac8e72'); floor.setAttribute('stroke-width', '0.2');
+  for (const item of plan.items) {
+    const d = CATALOG[item.type], g = document.createElementNS(ns, 'g');
+    g.setAttribute('transform', `translate(${item.x} ${item.z}) rotate(${-item.rotation * 180 / Math.PI})`);
+    rect(g, -d.width / 2, -d.depth / 2, d.width, d.depth,
+      item.type === 'chair' ? '#7b8c76' : item.type === 'table' ? '#caa66d' : d.color, isCouch(item.type) ? 0.16 : 0.03);
+    svg.append(g);
+  }
+  return svg;
+}
+function renderLayoutOptions() {
+  const container = $('layout-options'); container.replaceChildren();
+  for (const style of ['pockets', 'commons', 'ramble']) {
+    const d = LAYOUT_STYLES[style], card = document.createElement('article'); card.className = 'layout-option';
+    card.dataset.current = String(eventPlan?.layoutStyle === style);
+    const title = document.createElement('h3'); title.textContent = d.name;
+    const description = document.createElement('p'); description.textContent = d.description;
+    const details = document.createElement('small'), button = document.createElement('button'); button.type = 'button';
+    button.textContent = `Try ${d.name}`;
+    try {
+      const plan = activityLayout('hackathon', $('attendees').valueAsNumber, ROOM, style);
+      card.append(layoutThumbnail(plan));
+      details.textContent = `${plan.seated} desk seats · 8 couches · coffee, tea & snacks${plan.shortfall ? ` · short by ${plan.shortfall} seats` : ''}`;
+      button.onclick = () => { $('layout-style').value = style; $('layout-comparison').close(); applyActivity(); };
+    } catch (error) { details.textContent = error.message; button.disabled = true; }
+    card.append(title, description, details, button); container.append(card);
+  }
+}
 function previewActivity() {
   const activity = $('activity').value;
-  $('activity-description').textContent = ACTIVITIES[activity].description;
+  $('layout-controls').hidden = activity !== 'hackathon';
+  $('activity-description').textContent = activity === 'hackathon' && $('layout-style').value !== 'photo' ? LAYOUT_STYLES[$('layout-style').value].description : ACTIVITIES[activity].description;
   try {
-    const plan = activityLayout(activity, $('attendees').valueAsNumber);
+    const plan = activityLayout(activity, $('attendees').valueAsNumber, ROOM, activity === 'hackathon' ? $('layout-style').value : 'photo');
     $('activity-preview').textContent = `${plan.seated} / ${plan.requested} people seated · ${plan.capacity} seats in this template.` + (plan.activity === 'hackathon' ? ` ${plan.items.filter(i => isCouch(i.type)).length} couches · ${plan.items.filter(i => CATALOG[i.type].kind === 'refreshment').length} refreshment tables.` : '') + (plan.shortfall ? ` Short by ${plan.shortfall} seats. Try fewer people or another activity.` : ' Fits this illustrative arrangement.');
     $('activity-preview').dataset.shortfall = String(plan.shortfall > 0);
     $('apply-activity').disabled = false;
@@ -449,16 +489,19 @@ function previewActivity() {
 }
 $('activity').onchange = previewActivity;
 $('attendees').oninput = previewActivity;
-$('activity-form').onsubmit = e => {
-  e.preventDefault();
+function applyActivity() {
   const plan = previewActivity();
   if (!plan) return;
   checkpoint();
   const { items: arranged, ...summary } = plan;
   setItems(arranged, summary);
   setView('top');
-  status(`${ACTIVITIES[plan.activity].name} layout applied. Undo to recover your changes.`);
-};
+  status(`${plan.layoutStyle ? LAYOUT_STYLES[plan.layoutStyle].name : ACTIVITIES[plan.activity].name} layout applied. Undo to recover your changes.`);
+}
+$('activity-form').onsubmit = e => { e.preventDefault(); applyActivity(); };
+$('layout-style').onchange = previewActivity;
+$('compare-layouts').onclick = () => { renderLayoutOptions(); $('layout-comparison').showModal(); };
+$('close-comparison').onclick = () => $('layout-comparison').close();
 function registerModel(record, model) {
   customModels.set(record.id, { ...model, record });
   CATALOG[record.id] = { name: record.name, width: model.width, depth: model.depth, height: model.height };
@@ -522,7 +565,7 @@ try {
       let plan = null;
       if (data.eventPlan) {
         try {
-          const expected = activityLayout(data.eventPlan.activity, data.eventPlan.requested);
+          const expected = activityLayout(data.eventPlan.activity, data.eventPlan.requested, ROOM, data.eventPlan.layoutStyle || 'photo');
           // Only retain a capacity claim for exactly the generated furniture.
           if (JSON.stringify(expected.items) === JSON.stringify(data.furniture)) {
             const { items: arranged, ...summary } = expected;
