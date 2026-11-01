@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_ROOM, initialLayout } from './dist/layout.js';
+import { DEFAULT_ROOM, initialLayout, CATALOG } from './dist/layout.js';
 import { createTour, walkingRoute, walkable, TOUR_DURATION, WALK_START, WALK_END, ENTRY_START } from './dist/tour.js';
 test('eye-level route avoids furniture with room to turn', () => {
   const items = initialLayout(), route = walkingRoute(DEFAULT_ROOM, items);
@@ -60,4 +60,16 @@ test('chapter handoffs blend movement and camera direction without a snap', () =
     const a = direction(tour.sample(t - dt)), b = direction(tour.sample(t + dt));
     assert.ok(Math.hypot(...a.map((v, i) => v - b[i])) < 0.025, `view direction jumps at ${t}`);
   }
+});
+test('tour routes around the measured footprint of an imported model', () => {
+  const type = 'model_tour_test';
+  CATALOG[type] = { name: 'Imported partition', width: 4, depth: 1, height: 2 };
+  try {
+    const items = [{ type, x: 0, z: 0, rotation: Math.PI / 6 }], tour = createTour(DEFAULT_ROOM, items);
+    assert.ok(tour.inside);
+    for (let t = WALK_START + 1; t <= WALK_END; t += 0.05) {
+      const p = tour.sample(t).position;
+      assert.ok(walkable(p[0], p[2], DEFAULT_ROOM, items, 0.3));
+    }
+  } finally { delete CATALOG[type]; }
 });
