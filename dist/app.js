@@ -5,7 +5,7 @@ import { createTour, TOUR_DURATION, ENTRY_START } from './tour.js';
 import { openLibrary, readModels, storeModel, loadModel, disposeModel } from './model-library.js';
 import { MAX_MODEL_BYTES, modelName } from './model-file.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { ROOM, DEFAULT_ROOM, CATALOG, constrain, overlaps, validLayout, validRoom, initialLayout } from './layout.js';
+import { ROOM, DEFAULT_ROOM, validRoom, bounds, CATALOG, constrain, overlaps, validLayout, initialLayout, ACTIVITIES, activityLayout } from './layout.js';
 const $ = id => document.getElementById(id);
 const viewport = $('viewport');
 const customModels = new Map();
@@ -153,6 +153,7 @@ function updateRoomFields() {
 }
 buildRoom();
 const furniture = new THREE.Group(); scene.add(furniture);
+let eventPlan = null;
 let items = [], selected = null, nextId = 1, undoStack = [], redoStack = [], view = 'orbit';
 
 let crowdConfig = { ...DEFAULT_CROWD }, crowd = { people: [] }, crowdFrame = null;
@@ -175,8 +176,8 @@ $('people-form').onsubmit = e => {
 $('people-clear').onclick = () => { checkpoint(); crowdConfig = { ...DEFAULT_CROWD }; rebuildPeople(); updateInspector(); save(); };
 $('people-pause').onclick = () => { checkpoint(); crowdConfig.paused = !crowdConfig.paused; rebuildPeople(true); updateInspector(); save(); };
 function status(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(status.timer); status.timer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
-function save() { if (!libraryReady || !startupReady) { $('save-state').textContent = 'Saving paused — reload to restore your library'; return; } try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 3, crowd: crowdConfig, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
-function snapshot() { return structuredClone({ room: ROOM, items, crowdConfig }); }
+function save() { if (!libraryReady || !startupReady) { $('save-state').textContent = 'Saving paused — reload to restore your library'; return; } try { localStorage.setItem('warehouse-layout-v1', JSON.stringify({ version: 3, eventPlan, crowd: crowdConfig, room: { ...ROOM }, furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) })); $('save-state').textContent = 'Saved on this device'; } catch { $('save-state').textContent = 'Saving unavailable — export to keep layout'; } }
+function snapshot() { return structuredClone({ room: ROOM, items, eventPlan, crowdConfig }); }
 function checkpoint() { undoStack.push(snapshot()); if (undoStack.length > 50) undoStack.shift(); redoStack = []; }
 function meshFor(item) {
   const model = customModels.get(item.type);
@@ -186,7 +187,10 @@ function meshFor(item) {
   }
   const g = new THREE.Group(); g.userData.id = item.id;
   const d = CATALOG[item.type], fabric = mat(d.color), legs = steel;
-  if (item.type === 'table') {
+  if (item.type === 'stage') {
+    box(g, d.width, d.height, d.depth, 0, d.height / 2, 0, fabric);
+    box(g, d.width, 0.04, d.depth, 0, d.height, 0, wood);
+  } else if (item.type === 'table') {
     box(g, d.width, 0.08, d.depth, 0, 0.75, 0, wood);
     for (const x of [-0.84, 0.84]) for (const z of [-0.31, 0.31]) box(g, 0.055, 0.7, 0.055, x, 0.37, z, legs);
     box(g, 1.7, 0.04, 0.04, 0, 0.2, 0, legs);
@@ -218,43 +222,48 @@ function updateInspector() {
     $('collision').textContent = collision ? 'Overlaps another object. Move it to make space.' : `${(item.rotation * 180 / Math.PI % 360 + 360) % 360}° rotation · dimensions in metres`;
   }
   $('undo').disabled = !undoStack.length; $('redo').disabled = !redoStack.length;
+  $('layout-name').textContent = eventPlan ? `${ACTIVITIES[eventPlan.activity].name} · ${eventPlan.seated} seats for ${eventPlan.requested} people` : 'Your custom layout';
   $('object-count').textContent = `${items.length} objects`;
-  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
+  $('furniture-count').textContent = `${items.filter(i => i.type === 'table').length} tables · ${items.filter(i => i.type === 'couch').length} couches · ${items.filter(i => i.type === 'chair').length} chairs · ${items.filter(i => i.type === "stage").length} stages${items.some(i => customModels.has(i.type)) ? ` · ${items.filter(i => customModels.has(i.type)).length} imported` : ''}`;
 }
 function renderItems() {
   // Geometry/materials belong to individual furniture; shared wood and steel stay alive.
   for (const child of [...furniture.children]) { child.traverse(m => { if (!child.userData.customModel && m.isMesh) { m.geometry.dispose(); if (![wood, steel].includes(m.material)) m.material.dispose(); } }); furniture.remove(child); }
   for (const item of items) furniture.add(meshFor(item)); rebuildPeople(); updateInspector(); save();
 }
-function setItems(data) { items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
+function setItems(data, plan = null) { eventPlan = plan; items = data.map(i => ({ ...constrain(i), id: nextId++ })); selected = null; renderItems(); }
+function fitsRoom(item, room = ROOM) {
+  const b = bounds(item);
+  return Math.abs(item.x) + b.x <= room.width / 2 - 0.15 + 1e-9 && Math.abs(item.z) + b.z <= room.depth / 2 - 0.15 + 1e-9;
+}
 function findSpot(type, preferred, rotation = 0) {
   const d = CATALOG[type], c = Math.abs(Math.cos(rotation)), s = Math.abs(Math.sin(rotation));
   if (d.width * c + d.depth * s > ROOM.width - 0.3 || d.width * s + d.depth * c > ROOM.depth - 0.3 || d.height > ROOM.eaves) return null;
   const candidates = preferred ? [preferred] : [];
   for (let z = 0; z <= ROOM.depth / 2 - 0.5; z += 1.5) for (let x = -ROOM.width / 2 + 1.5; x <= ROOM.width / 2 - 1.5; x += 1.5) for (const sign of z ? [1, -1] : [1]) candidates.push({ x, z: z * sign });
-  return candidates.map(p => constrain({ type, ...p, rotation })).find(p => items.every(i => !overlaps(p, i)));
+  return candidates.map(p => constrain({ type, ...p, rotation })).filter(p => fitsRoom(p)).find(p => items.every(i => !overlaps(p, i)));
 }
-function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
-function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = fn({ ...items[i] }), d = CATALOG[next.type], c = Math.abs(Math.cos(next.rotation)), s = Math.abs(Math.sin(next.rotation)); if (d.width * c + d.depth * s > ROOM.width - 0.3 || d.width * s + d.depth * c > ROOM.depth - 0.3) { return status('This object does not fit at that rotation.'); } checkpoint(); items[i] = constrain(next); renderItems(); }
-function remove() { if (selected === null) return; checkpoint(); items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
-function history(from, to) { if (!from.length) return; to.push(snapshot()); const state = from.pop(); Object.assign(ROOM, state.room); items = state.items; crowdConfig = state.crowdConfig; selected = null; buildRoom(); renderItems(); setView(view); }
+function add(type) { if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const item = findSpot(type); if (!item) return status('No free space found. Move or remove furniture first.'); checkpoint(); eventPlan = null; item.id = nextId++; items.push(item); selected = item.id; renderItems(); status(`${CATALOG[type].name} added`); }
+function changeSelected(fn) { const i = items.findIndex(i => i.id === selected); if (i < 0) return; const next = constrain(fn({ ...items[i] })); if (!fitsRoom(next)) return status('This object does not fit at that rotation. Enlarge the room first.'); checkpoint(); eventPlan = null; items[i] = next; renderItems(); }
+function remove() { if (selected === null) return; checkpoint(); eventPlan = null; items = items.filter(i => i.id !== selected); selected = null; renderItems(); }
+function history(from, to) { if (!from.length) return; to.push(snapshot()); const previous = from.pop(); Object.assign(ROOM, previous.room); items = previous.items; crowdConfig = previous.crowdConfig; eventPlan = previous.eventPlan; selected = null; buildRoom(); renderItems(); previewActivity(); setView(view); }
 for (const btn of document.querySelectorAll('[data-add]')) btn.onclick = () => add(btn.dataset.add);
 $('rotate').onclick = () => changeSelected(i => ({ ...i, rotation: (i.rotation + Math.PI / 4) % (Math.PI * 2) }));
 $('delete').onclick = remove;
-$('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
+$('duplicate').onclick = () => { const i = items.find(i => i.id === selected); if (!i) return; if (items.length >= 200) return status('This prototype supports up to 200 objects.'); const spot = findSpot(i.type, { x: i.x + 1, z: i.z + 1 }, i.rotation); if (!spot) return status('No free space for a duplicate'); checkpoint(); eventPlan = null; const copy = constrain({ ...spot, rotation: i.rotation, id: nextId++ }); items.push(copy); selected = copy.id; renderItems(); };
 for (const axis of ['x', 'z']) $('pos-' + axis).onchange = e => { const value = e.target.valueAsNumber; if (Number.isFinite(value)) changeSelected(i => ({ ...i, [axis]: value })); else updateInspector(); };
 $('undo').onclick = () => history(undoStack, redoStack); $('redo').onclick = () => history(redoStack, undoStack);
-$('reset').onclick = () => { checkpoint(); crowdConfig = { ...DEFAULT_CROWD }; Object.assign(ROOM, DEFAULT_ROOM); buildRoom(); setItems(initialLayout()); setView(view); status('Original layout restored. Undo to recover your changes.'); };
+$('reset').onclick = () => { checkpoint(); crowdConfig = { ...DEFAULT_CROWD }; Object.assign(ROOM, DEFAULT_ROOM); buildRoom(); setItems(initialLayout()); previewActivity(); setView(view); status('Original layout restored. Undo to recover your changes.'); };
 $('room-form').onsubmit = e => {
   e.preventDefault();
   const room = Object.fromEntries(['width', 'depth', 'eaves', 'ridge'].map(key => [key, $('room-' + key).valueAsNumber]));
   if (!validRoom(room)) { $('room-error').textContent = 'Use width/length 6–60 m, wall height 3–15 m, and a roof peak at least 0.5 m higher (up to 20 m).'; return; }
   if (Object.keys(room).every(key => room[key] === ROOM[key])) return;
-  if (items.some(i => { const d = CATALOG[i.type], c = Math.abs(Math.cos(i.rotation)), s = Math.abs(Math.sin(i.rotation)); return d.width * c + d.depth * s > room.width - 0.3 || d.width * s + d.depth * c > room.depth - 0.3 || d.height > room.eaves; })) { $('room-error').textContent = 'Remove furniture that is too large for these dimensions before resizing.'; return; }
-  checkpoint(); Object.assign(ROOM, room);
+  if (items.some(item => !fitsRoom({ ...item, x: 0, z: 0 }, room) || CATALOG[item.type].height > room.eaves)) { $('room-error').textContent = 'Some furniture is too large for these dimensions. Remove or rotate it before resizing.'; return; }
+  checkpoint(); eventPlan = null; Object.assign(ROOM, room);
   let moved = 0;
   items = items.map(item => { const next = constrain(item); if (next.x !== item.x || next.z !== item.z) moved++; return next; });
-  buildRoom(); renderItems(); setView(view);
+  buildRoom(); renderItems(); previewActivity(); setView(view);
   const collision = items.some((item, i) => items.slice(i + 1).some(other => overlaps(item, other)));
   $('room-error').textContent = collision ? 'Some furniture overlaps. Rearrange it to make space, or undo the resize.' : '';
   status(moved ? `Room resized. ${moved} objects moved inside the boundary.` : 'Warehouse dimensions updated');
@@ -268,7 +277,7 @@ function exportedModels() {
     return { id: type, name: record.name, filename: record.filename, glbBase64: btoa(binary) };
   });
 }
-$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, crowd: crowdConfig, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
+$('export').onclick = () => { const blob = new Blob([JSON.stringify({ version: 3, eventPlan, crowd: crowdConfig, units: 'metres', approximate: true, room: ROOM, models: exportedModels(), furniture: items.map(({ type, x, z, rotation }) => ({ type, x, z, rotation })) }, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'warehouse-layout.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); status('Layout exported'); };
 const tourState = { plan: null, time: 0, playing: false, lastFrame: null, chapter: '' };
 function tourPlan() { return createTour(ROOM, items, camera.aspect); }
 function setPlaying(playing) {
@@ -368,7 +377,7 @@ renderer.domElement.addEventListener('pointermove', e => {
   if (!drag) { renderer.domElement.style.cursor = hit() !== null ? 'grab' : 'default'; return; }
   if (!p) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) < 4) return;
-  if (!drag.moved) { checkpoint(); drag.moved = true; }
+  if (!drag.moved) { checkpoint(); eventPlan = null; drag.moved = true; }
   let x = p.x + drag.offset.x, z = p.z + drag.offset.z;
   if ($('snap').checked) { x = Math.round(x * 4) / 4; z = Math.round(z * 4) / 4; }
   const i = items.findIndex(i => i.id === drag.id); items[i] = constrain({ ...items[i], x, z });
@@ -390,6 +399,33 @@ window.addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'r') $('rotate').click();
   if (e.key === 'Escape') { selected = null; updateInspector(); }
 });
+function previewActivity() {
+  const activity = $('activity').value;
+  $('activity-description').textContent = ACTIVITIES[activity].description;
+  try {
+    const plan = activityLayout(activity, $('attendees').valueAsNumber);
+    $('activity-preview').textContent = `${plan.seated} / ${plan.requested} people seated · ${plan.capacity} seats in this template.` + (plan.shortfall ? ` Short by ${plan.shortfall} seats. Try fewer people or another activity.` : ' Fits this illustrative arrangement.');
+    $('activity-preview').dataset.shortfall = String(plan.shortfall > 0);
+    $('apply-activity').disabled = false;
+    return plan;
+  } catch (error) {
+    $('activity-preview').textContent = error.message;
+    $('apply-activity').disabled = true;
+    return null;
+  }
+}
+$('activity').onchange = previewActivity;
+$('attendees').oninput = previewActivity;
+$('activity-form').onsubmit = e => {
+  e.preventDefault();
+  const plan = previewActivity();
+  if (!plan) return;
+  checkpoint();
+  const { items: arranged, ...summary } = plan;
+  setItems(arranged, summary);
+  setView('top');
+  status(`${ACTIVITIES[plan.activity].name} layout applied. Undo to recover your changes.`);
+};
 function registerModel(record, model) {
   customModels.set(record.id, { ...model, record });
   CATALOG[record.id] = { name: record.name, width: model.width, depth: model.depth, height: model.height };
@@ -438,8 +474,36 @@ try {
   $('library-status').textContent = 'Model storage could not be opened. Reload to retry; your saved layout will be preserved.';
 }
 let restored = false;
-try { const raw = localStorage.getItem('warehouse-layout-v1'); if (raw) { const data = JSON.parse(raw); const savedItems = Array.isArray(data) ? data : data?.furniture; if (Array.isArray(savedItems) && savedItems.some(i => typeof i?.type === 'string' && i.type.startsWith('model_') && !customModels.has(i.type))) { libraryReady = false; $('library-status').textContent = 'A saved model is missing. Saving is paused to preserve your layout. Restore the browser library or reload after reopening storage.'; } if (validCrowd(data?.crowd)) crowdConfig = { ...data.crowd }; if (Array.isArray(data) && validLayout(data)) { setItems(data); restored = true; } else if (data && validRoom(data.room) && validLayout(data.furniture)) { Object.assign(ROOM, data.room); buildRoom(); setItems(data.furniture); restored = true; } } } catch { }
+try {
+  const raw = localStorage.getItem('warehouse-layout-v1') || localStorage.getItem('warehouse-layout-v2');
+  if (raw) {
+    const data = JSON.parse(raw);
+    if (validCrowd(data?.crowd)) crowdConfig = { ...data.crowd };
+    const savedItems = Array.isArray(data) ? data : data?.furniture;
+    if (Array.isArray(savedItems) && savedItems.some(i => typeof i?.type === 'string' && i.type.startsWith('model_') && !customModels.has(i.type))) {
+      libraryReady = false; $('library-status').textContent = 'A saved model is missing. Saving is paused to preserve your layout. Restore the browser library or reload after reopening storage.';
+    }
+    if (Array.isArray(data) && validLayout(data)) { setItems(data); restored = true; }
+    else if (data && validLayout(data.furniture) && (!data.room || validRoom(data.room))) {
+      Object.assign(ROOM, data.room || DEFAULT_ROOM); buildRoom();
+      let plan = null;
+      if (data.eventPlan) {
+        try {
+          const expected = activityLayout(data.eventPlan.activity, data.eventPlan.requested);
+          // Only retain a capacity claim for exactly the generated furniture.
+          if (JSON.stringify(expected.items) === JSON.stringify(data.furniture)) {
+            const { items: arranged, ...summary } = expected;
+            plan = summary;
+          }
+        } catch { /* Invalid activity metadata must not discard valid furniture. */ }
+      }
+      setItems(data.furniture, plan); restored = true;
+      if (plan) { $('activity').value = plan.activity; $('attendees').value = plan.requested; }
+    }
+  }
+} catch { }
 if (!restored) setItems(initialLayout());
+previewActivity();
 startupReady = true; document.querySelector('main').inert = false; $('export').disabled = false; save();
 setView('orbit'); $('loading').remove();
 new ResizeObserver(() => { const { width, height } = viewport.getBoundingClientRect(); renderer.setSize(width, height); camera.aspect = width / height; camera.updateProjectionMatrix(); if (view !== 'inside') fitCamera(); }).observe(viewport);

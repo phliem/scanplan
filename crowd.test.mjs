@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_CROWD, validCrowd, createCrowd, advanceCrowd, clearPoint } from './dist/crowd.js';
-import { DEFAULT_ROOM, CATALOG, initialLayout } from './dist/layout.js';
+import { DEFAULT_ROOM, CATALOG, initialLayout, activityLayout } from './dist/layout.js';
 const config = (count, behavior = 'mixed') => ({ count, behavior, paused: false });
 
 test('crowd settings reject invalid persisted counts and behaviors', () => {
@@ -56,4 +56,14 @@ test('empty, crowded and blocked rooms return honest placement counts', () => {
 test('seats blocked by solid furniture are left empty', () => {
   const items = [{ type: 'chair', x: 0, z: 0, rotation: Math.PI / 4 }, { type: 'solid', x: 0, z: 0, rotation: Math.PI / 4 }];
   assert.equal(createCrowd(config(1, 'seated'), DEFAULT_ROOM, items, { ...CATALOG, solid: { width: 2, depth: 2 } }).seated, 0);
+});
+
+
+test('event templates provide usable seats for the animated crowd', () => {
+  for (const activity of ['hackathon', 'theatre']) {
+    const layout = activityLayout(activity, 100);
+    const crowd = createCrowd(config(100, 'seated'), DEFAULT_ROOM, layout.items, CATALOG);
+    assert.equal(crowd.seated, 100, activity);
+    assert.equal(crowd.standing, 0, activity);
+  }
 });

@@ -10,12 +10,12 @@ function localPoint(x, z, item) {
   const c = Math.cos(item.rotation), s = Math.sin(item.rotation), dx = x - item.x, dz = z - item.z;
   return { x: c * dx - s * dz, z: s * dx + c * dz };
 }
-export function clearPoint(x, z, room, items, catalog, ignore = null) {
+export function clearPoint(x, z, room, items, catalog, ignore = null, radius = RADIUS) {
   return Math.abs(x) <= room.width / 2 - 0.4 && Math.abs(z) <= room.depth / 2 - 0.4
     && items.every(item => {
       if (item === ignore) return true;
       const p = localPoint(x, z, item), d = catalog[item.type];
-      return Math.hypot(Math.max(0, Math.abs(p.x) - d.width / 2), Math.max(0, Math.abs(p.z) - d.depth / 2)) >= RADIUS;
+      return Math.hypot(Math.max(0, Math.abs(p.x) - d.width / 2), Math.max(0, Math.abs(p.z) - d.depth / 2)) >= radius;
     });
 }
 export function createCrowd(config, room, items, catalog) {
@@ -43,7 +43,7 @@ export function createCrowd(config, room, items, catalog) {
       if (!clearPoint(x, z, room, items, catalog, item)) continue;
       // Knees can tuck under a work table, but never under another seat or solid model.
       const kneeObstacles = items.filter(other => other.type !== 'table');
-      if (![0.35, 0.55].every(forward => clearPoint(x + s * forward, z + c * forward, room, kneeObstacles, catalog, item))) continue;
+      if (![0.2, 0.4].every(forward => clearPoint(x + s * forward, z + c * forward, room, kneeObstacles, catalog, item, 0.09))) continue;
       people.push({ x, z, rotation: item.rotation, state: 'seated', seatHeight: item.type === 'couch' ? 0.65 : 0.5 });
     }
   }
