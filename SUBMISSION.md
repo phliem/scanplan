@@ -4,6 +4,10 @@ Prepared for 1 November 2026. Draft copy; not submitted.
 
 ## Form copy
 
+**Team name:** Scanplan
+
+**Team members:** Liem Pham (presenter), George McCarthy. Contact details belong in the private submission form.
+
 **Project name:** Scanplan
 
 **Tagline:** Plan the event. Walk the room before anyone arrives.
