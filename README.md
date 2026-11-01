@@ -13,6 +13,7 @@ There are no runtime package dependencies. Three.js 0.170.0 and OrbitControls ar
 - Edit **Warehouse dimensions** (width, length, wall height and roof peak in metres), then **Apply dimensions**. The room rebuilds while furniture keeps its size. Furniture outside a smaller room moves inside; overlap warnings indicate where to rearrange it. Resizing is undoable. Width/length support 6–60 m, wall height 3–15 m and roof peak up to 20 m, at least 0.5 m above the walls.
 - Drag empty space to orbit; scroll or use +/− to zoom. Right-drag pans.
 - Select **Floor plan** for overhead placement or **Inside** for an eye-level perspective.
+- Select **Video** for a 38-second live 3D film: start overhead, fly towards the entrance, walk through the current layout at 1.65 m eye height, and slowly look around. The tour uses the current room dimensions and routes around furniture. Play/pause, replay, and scrub the timeline; **Explore from here** returns camera control at the current position. Reduced-motion preferences start the tour paused. If furniture blocks the entrance, the film stays at the doorway. This is a live animation, not an exported video file.
 - Drag furniture to move it; optionally snap to a 0.25 m grid. The inspector also accepts coordinates in metres, relative to the room centre.
 - Add tables, couches and chairs from the catalogue; rotate, duplicate or delete selected items. R rotates, Delete removes and Escape deselects.
 - Undo/redo with the toolbar or Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z. History lasts for the current page session. Reset restores both the original dimensions and furniture and can also be undone.
@@ -23,6 +24,6 @@ The source photo and its people are not included or uploaded. All geometry and t
 
 ## Verification
 
-`corepack pnpm test` tests rotated boundaries, collision detection, initial furniture placement and saved-layout validation. Browser QA covers the three views, adding, dragging, rotating, editing coordinates, local persistence and history controls.
+`corepack pnpm test` tests rotated boundaries, collision detection, initial furniture placement and saved-layout validation. Tour tests cover clear routes, smooth camera positions, small/large rooms and a blocked entrance. Browser QA covers all views and tour playback/scrubbing, adding, dragging, rotating, editing coordinates, local persistence and history controls.
 
 Static deployment uses `dist/`. The existing private prototype is at https://brickworks-warehouse-planner.lacypixie.chatgpt.site (ChatGPT sign-in required). This repository is independent of the Octo Devlabs monorepo; the original source is preserved there.
