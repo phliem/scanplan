@@ -14,13 +14,17 @@ test('150-person hackathon includes 25 desks, 150 chairs, eight different couche
   assert.deepEqual(plan.items.filter(i => isCouch(i.type)).map(i => i.type), COUCH_TYPES);
   for (const type of ['coffee', 'tea', 'snacks']) assert.equal(plan.items.filter(i => i.type === type).length, 1);
   const desks = plan.items.filter(i => i.type === 'table');
-  assert.ok(Math.min(...desks.map(i => i.z)) < -8.8);
-  assert.ok(Math.max(...desks.map(i => i.z)) > 9);
-  assert.equal(new Set(desks.map(i => i.x)).size, 3);
+  const groups = [...new Set(desks.map(i => i.z))];
+  assert.equal(groups.length, 5);
+  for (const z of groups) assert.equal(desks.filter(i => i.z === z).length, 5);
   const couches = plan.items.filter(i => isCouch(i.type));
-  assert.equal(couches.filter(i => i.x < 0).length, 4);
-  assert.equal(couches.filter(i => i.x > 0).length, 4);
-  assert.ok(Math.max(...couches.map(i => i.z)) - Math.min(...couches.map(i => i.z)) > 14);
+  for (const side of [-1, 1]) {
+    const group = couches.filter(i => Math.sign(i.x) === side);
+    assert.equal(group.length, 4);
+    assert.equal(new Set(group.map(i => i.z)).size, 2);
+    assert.equal(group.filter(i => i.rotation === 0).length, 2);
+    assert.equal(group.filter(i => i.rotation === Math.PI).length, 2);
+  }
   const roundTrip = JSON.parse(JSON.stringify(plan));
   assert.deepEqual(roundTrip, plan);
 });
@@ -51,14 +55,11 @@ test('generated models stay inside declared selection and collision footprints',
   assert.equal(new Set(COUCH_TYPES.map(t => CATALOG[t].color)).size, 8);
 });
 
-test('smaller hackathons still distribute desks to both ends and both sides', () => {
+test('smaller hackathons distribute desks between up to five groups', () => {
   for (const requested of [6, 24, 60, 100]) {
     const plan = activityLayout('hackathon', requested);
     const desks = plan.items.filter(i => i.type === 'table');
-    if (desks.length > 1) {
-      assert.ok(desks.some(i => i.z < -8.8) && desks.some(i => i.z > 9));
-      assert.ok(desks.some(i => i.x < 0) && desks.some(i => i.x > 0));
-    }
+    assert.equal(new Set(desks.map(i => i.z)).size, Math.min(5, desks.length));
     assert.equal(plan.items.filter(i => i.type === 'chair').length, requested);
   }
 });

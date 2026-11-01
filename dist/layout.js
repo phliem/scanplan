@@ -60,7 +60,7 @@ export function initialLayout() {
 }
 
 export const ACTIVITIES = {
-  hackathon: { name: 'Hackathon', description: '150 desk seats spread across the default venue, eight colourful couches along the side walls, plus coffee, tea and snacks.' },
+  hackathon: { name: 'Hackathon', description: 'Five table groups for 150 people, two lounge groups with four couches each, plus coffee, tea and snacks.' },
   theatre: { name: 'Theatre night', description: 'A stage with forward-facing seating and a central aisle.' },
 };
 
@@ -75,31 +75,47 @@ export function activityLayout(activity, requested, room = ROOM) {
   let capacity;
   if (activity === 'hackathon') {
     const lounge = room.width >= 11 && room.depth >= 18;
+    const grouped = room.width >= 11 && room.depth >= 22;
     const seatsPerTable = 6;
     if (lounge) {
-      // Four couches down each side, with tables using the full room length.
       COUCH_TYPES.forEach((type, i) => {
         const side = i < 4 ? -1 : 1;
-        const z = (i % 4 / 3 - 0.5) * (room.depth - 7.6);
-        add(type, side * (room.width / 2 - 0.7), z, -side * Math.PI / 2);
+        if (grouped) {
+          // Two facing pairs in each of two separate four-couch lounges.
+          const row = Math.floor(i % 4 / 2);
+          add(type, side * room.width / 4 + (i % 2 ? 1.15 : -1.15), room.depth / 2 - (row ? 1.4 : 3.6), row ? Math.PI : 0);
+        } else {
+          const z = (i % 4 / 3 - 0.5) * (room.depth - 7.6);
+          add(type, side * (room.width / 2 - 0.7), z, -side * Math.PI / 2);
+        }
       });
     }
     // Leave a clear entry apron before the first chairs.
-    const firstZ = -room.depth / 2 + 2.1, lastZ = room.depth / 2 - 1.4;
+    const firstZ = -room.depth / 2 + 2.1, lastZ = room.depth / 2 - (grouped ? 6.6 : 1.4);
     const rows = Math.max(1, Math.floor((lastZ - firstZ) / 2.3) + 1);
     const columns = [];
     const outerX = room.width / 2 - (lounge ? 2.4 : 1.15);
     const columnCount = Math.max(1, Math.floor(outerX * 2 / 3.1) + 1);
     for (let col = 0; col < columnCount; col++) columns.push(columnCount === 1 ? 0 : -outerX + col * 2 * outerX / (columnCount - 1));
-    for (let row = 0; row < rows; row++) for (let col = 0; col < columns.length; col++) {
-      // Two end bays become refreshment areas instead of desk islands.
-      if (lounge && row === rows - 1 && (col === 0 || col === columns.length - 1)) continue;
-      slots.push({ x: columns[col], z: rows === 1 ? 0 : firstZ + row * (lastZ - firstZ) / (rows - 1) });
-    }
-    if (lounge) {
-      add('coffee', columns[0], lastZ - 0.5);
-      add('tea', columns[0], lastZ + 0.5);
-      add('snacks', columns.at(-1), lastZ);
+    if (grouped) {
+      // Five joined worktables per group, six chairs per table: 30 people.
+      // Assign one table to each group in turn so smaller requests stay spread.
+      for (const x of [0, -2, 2, -4, 4]) for (let group = 0; group < 5; group++)
+        slots.push({ x, z: firstZ + group * (lastZ - firstZ) / 4 });
+      const end = room.depth / 2;
+      add('coffee', -room.width / 4 - 1.15, end - 4.9);
+      add('tea', -room.width / 4 + 1.15, end - 4.9);
+      add('snacks', room.width / 4, end - 4.9);
+    } else {
+      for (let row = 0; row < rows; row++) for (let col = 0; col < columns.length; col++) {
+        if (lounge && row === rows - 1 && (col === 0 || col === columns.length - 1)) continue;
+        slots.push({ x: columns[col], z: rows === 1 ? 0 : firstZ + row * (lastZ - firstZ) / (rows - 1) });
+      }
+      if (lounge) {
+        add('coffee', columns[0], lastZ - 0.5);
+        add('tea', columns[0], lastZ + 0.5);
+        add('snacks', columns.at(-1), lastZ);
+      }
     }
     const maxTables = Math.min(slots.length, Math.floor((200 - items.length) / (seatsPerTable + 1)));
     capacity = maxTables * seatsPerTable; // Lounge seats are additional.
@@ -108,7 +124,7 @@ export function activityLayout(activity, requested, room = ROOM) {
     // Sample across the whole grid, even for smaller groups, instead of filling
     // from the entrance and leaving the far half empty.
     for (let i = 0; i < tableCount; i++) {
-      const index = tableCount === 1 ? Math.floor((slots.length - 1) / 2) : Math.round(i * (slots.length - 1) / (tableCount - 1));
+      const index = grouped ? i : tableCount === 1 ? Math.floor((slots.length - 1) / 2) : Math.round(i * (slots.length - 1) / (tableCount - 1));
       const { x, z } = slots[index];
       add('table', x, z);
       for (const dz of [-0.85, 0.85]) for (const dx of [-0.67, 0, 0.67]) {
