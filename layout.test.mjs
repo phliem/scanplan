@@ -33,3 +33,18 @@ test('collision axes match Three.js rotations beyond 45 degree steps', () => {
   assert.equal(overlaps(a, { ...a, z: 1.1 }), false);
   assert.equal(overlaps(a, { ...a, z: 0.5 }), true);
 });
+test('resized rooms constrain furniture without changing its dimensions', () => {
+  const small = { width: 6, depth: 8, eaves: 3, ridge: 4 };
+  for (const type of Object.keys(CATALOG)) for (const rotation of [0, Math.PI / 6, Math.PI / 4, Math.PI / 2]) {
+    const item = constrain({ type, rotation, x: 50, z: -50 }, small), b = bounds(item);
+    assert.ok(Math.abs(item.x) + b.x <= small.width / 2 - 0.149);
+    assert.ok(Math.abs(item.z) + b.z <= small.depth / 2 - 0.149);
+    assert.equal(item.rotation, rotation);
+  }
+});
+test('room dimensions reject invalid ranges and roofs below the walls', async () => {
+  const { validRoom, DEFAULT_ROOM } = await import('./dist/layout.js');
+  assert.equal(validRoom(DEFAULT_ROOM), true);
+  assert.equal(validRoom({ width: 60, depth: 60, eaves: 15, ridge: 20 }), true);
+  for (const room of [null, {}, { ...DEFAULT_ROOM, width: NaN }, { ...DEFAULT_ROOM, depth: Infinity }, { ...DEFAULT_ROOM, width: 5.9 }, { ...DEFAULT_ROOM, depth: 61 }, { ...DEFAULT_ROOM, eaves: 2.9 }, { ...DEFAULT_ROOM, ridge: 5.3 }, { ...DEFAULT_ROOM, ridge: 21 }]) assert.equal(validRoom(room), false);
+});
